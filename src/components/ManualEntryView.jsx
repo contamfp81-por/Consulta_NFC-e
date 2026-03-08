@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { db } from '../db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Plus, Trash2, Save, X, Calculator, Store, Calendar, Tag } from 'lucide-react';
+import { Plus, Trash2, Save, X, Calculator, Store, Calendar, Tag, QrCode } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const ManualEntryView = ({ onComplete, onCancel }) => {
+const ManualEntryView = ({ onComplete, onCancel, onScan }) => {
     const [establishment, setEstablishment] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [products, setProducts] = useState([
