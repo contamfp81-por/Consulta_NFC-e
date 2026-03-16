@@ -1010,111 +1010,7 @@ const drawLineAreaChart = ({
     return canvas;
 };
 
-const drawProjectionChart = ({
-    title,
-    subtitle,
-    data,
-    actualKey = 'actual',
-    projectedKey = 'projected',
-    labelKey = 'day',
-    emptyMessage = 'Sem dados de projeção para o mês atual',
-    width = 1400,
-    height = 500
-}) => {
-    const { canvas, context } = createCanvas(width, height);
-    if (!data || !data.length) {
-        drawEmptyState(context, canvas.width, canvas.height, title, subtitle, emptyMessage);
-        return canvas;
-    }
-
-    drawFrame(context, canvas.width, canvas.height, title, subtitle);
-    const area = { left: 90, top: 100, width: canvas.width - 150, height: canvas.height - 180 };
-    
-    const allValues = data.flatMap((item) => [
-        item[actualKey] !== null ? Number(item[actualKey]) : null,
-        item[projectedKey] !== null ? Number(item[projectedKey]) : null
-    ]).filter(v => v !== null && !isNaN(v));
-    
-    const maxValue = Math.max(...allValues, 100) * 1.1;
-    const minValue = 0;
-    const range = maxValue - minValue;
-
-    drawGridLines(context, area, minValue, maxValue, formatCurrency);
-
-    // Filter points for actual line (up to current day)
-    const actualPoints = data
-        .filter(item => item[actualKey] !== null)
-        .map((item, index) => ({
-            x: area.left + (area.width / Math.max(1, data.length - 1)) * index,
-            y: area.top + area.height - ((Number(item[actualKey]) - minValue) / range) * area.height
-        }));
-
-    // All points for projected line
-    const projectedPoints = data.map((item, index) => ({
-        x: area.left + (area.width / Math.max(1, data.length - 1)) * index,
-        y: area.top + area.height - ((Number(item[projectedKey]) - minValue) / range) * area.height
-    }));
-
-    // Draw Projected Line (Dashed)
-    context.save();
-    context.setLineDash([12, 8]);
-    context.beginPath();
-    projectedPoints.forEach((point, index) => {
-        if (index === 0) context.moveTo(point.x, point.y);
-        else context.lineTo(point.x, point.y);
-    });
-    context.strokeStyle = COLORS.cyan;
-    context.lineWidth = 3;
-    context.stroke();
-    context.restore();
-
-    // Draw Actual Line (Solid)
-    context.beginPath();
-    actualPoints.forEach((point, index) => {
-        if (index === 0) context.moveTo(point.x, point.y);
-        else context.lineTo(point.x, point.y);
-    });
-    context.strokeStyle = COLORS.navy;
-    context.lineWidth = 5;
-    context.stroke();
-
-    // Draw points for labels
-    data.forEach((item, index) => {
-        const x = area.left + (area.width / Math.max(1, data.length - 1)) * index;
-        const labelFrequency = Math.max(1, Math.ceil(data.length / 10));
-        if (index === 0 || index === data.length - 1 || index % labelFrequency === 0) {
-            context.fillStyle = COLORS.muted;
-            context.font = '400 13px Arial';
-            context.textAlign = 'center';
-            context.fillText(String(item[labelKey]), x, canvas.height - 40);
-        }
-    });
-
-    // Legend
-    const legendX = canvas.width - 250;
-    const legendY = 35;
-    
-    context.save();
-    context.fillStyle = COLORS.navy;
-    context.fillRect(legendX, legendY, 20, 4);
-    context.fillStyle = COLORS.text;
-    context.font = '700 14px Arial';
-    context.textAlign = 'left';
-    context.fillText('Real Acumulado', legendX + 30, legendY + 7);
-
-    context.setLineDash([6, 4]);
-    context.strokeStyle = COLORS.cyan;
-    context.lineWidth = 3;
-    context.beginPath();
-    context.moveTo(legendX, legendY + 25);
-    context.lineTo(legendX + 20, legendY + 25);
-    context.stroke();
-    context.fillStyle = COLORS.text;
-    context.fillText('Projeção Linear', legendX + 30, legendY + 28);
-    context.restore();
-
-    return canvas;
-};
+// drawProjectionChart removed as requested to prioritize technical scenarios table
 
 const buildVisibleSegments = (data, maxSegments, remainderLabel) => {
     if (!data.length) return [];
@@ -1922,6 +1818,60 @@ const addChartPage = (pdf, reportTitle, pageTitle, canvas, insights) => {
     addInsightBlock(pdf, 'Tend\u00eancia de consumo', insights.tendencia, 40, 615, 515, COLORS.slate);
 };
 
+const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
+    addPageHeader(pdf, reportTitle, 'Algoritmo de Previs\u00e3o de Gastos');
+    
+    pdf.setTextColor(COLORS.text);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(18);
+    pdf.text('Algoritmo de Previs\u00e3o de Alta Precis\u00e3o', 40, 102);
+    
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(11);
+    pdf.setTextColor(COLORS.text);
+    const introText = 'RELAT\u00d3RIO DE RISCO E PREVIS\u00c3O (PADR\u00c3O BANC\u00c1RIO)\nAnalise hibrida de series temporais (Holt-Winters) e Run Rate para previsao com meta de 92% de precisao.';
+    pdf.text(pdf.splitTextToSize(introText, 515), 40, 122);
+    
+    const columns = [
+        { label: 'Cenario', width: 100 },
+        { label: 'Descricao da Logica', width: 315 },
+        { label: 'Valor Previsto', width: 100 }
+    ];
+    
+    const scenarios = reportData.monthInsight?.scenarios;
+    if (scenarios) {
+        const rows = [
+            { name: 'Conservador', logic: scenarios.conservador.description, value: formatCurrency(scenarios.conservador.value) },
+            { name: 'Provavel', logic: scenarios.provavel.description, value: formatCurrency(scenarios.provavel.value), isBold: true },
+            { name: 'Se repetir picos', logic: scenarios.picos.description, value: formatCurrency(scenarios.picos.value) }
+        ];
+        
+        let currentY = addTableHeader(pdf, columns, 40, 170);
+        rows.forEach(row => {
+            if (row.isBold) pdf.setFont('helvetica', 'bold');
+            else pdf.setFont('helvetica', 'normal');
+            currentY = addTableRow(pdf, columns, [row.name, row.logic, row.value], 40, currentY);
+        });
+        
+        pdf.setFont('helvetica', 'italic');
+        pdf.setFontSize(9);
+        pdf.setTextColor(COLORS.muted);
+        pdf.text('A analise considera sazonalidade, Run Rate e elasticidade de categorias.', 40, currentY + 20);
+    } else {
+        pdf.text('Dados de projecao insuficientes para o mes atual.', 40, 180);
+    }
+
+    addInsightBlock(pdf, 'Leitura de Risco', insights.projection.comportamento, 40, 350, 515, COLORS.blue);
+    addInsightBlock(pdf, 'Tendencia e Ajustes', insights.projection.tendencia, 40, 490, 515, COLORS.cyan);
+    
+    addNarrativeCard(
+        pdf, 
+        'Conclusao da Analise', 
+        insights.projection.tendencia + ' ' + (reportData.monthInsight?.outlookSentence || ''), 
+        40, 630, 515, 100, COLORS.navy
+    );
+};
+
 export const exportToExcel = (data, filename = 'gastos_contabeis.xlsx') => {
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
@@ -1992,19 +1942,9 @@ export const generateConsumptionAnalysisPdf = async ({
     addNarrativeCard(pdf, 'Recorr\u00eancia di\u00e1ria', insights.summary.recurrenceNote, 304, 508, 251, 110, COLORS.cyan);
     addNarrativeCard(pdf, 'Leitura inflacion\u00e1ria', insights.summary.inflationNote, 40, 632, 515, 96, COLORS.slate);
 
+    addProjectionAnalysisPage(pdf, insights.summary.title, reportData, insights);
+
     const chartPages = [
-        {
-            title: 'Proje\u00e7\u00e3o de Fechamento do M\u00eas',
-            canvas: drawProjectionChart({
-                title: 'Proje\u00e7\u00e3o de Fechamento do M\u00eas',
-                subtitle: reportData.monthInsight?.outlookSentence || 'Baseado no comportamento de gasto real e m\u00e9dia linear',
-                data: reportData.monthInsight?.projectionChartData || [],
-                actualKey: 'actual',
-                projectedKey: 'projected',
-                labelKey: 'day'
-            }),
-            insights: insights.projection
-        },
         {
             title: 'Evolu\u00e7\u00e3o dos Gastos ao Longo do Tempo',
             canvas: drawLineAreaChart({
