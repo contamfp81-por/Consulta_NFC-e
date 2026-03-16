@@ -41,7 +41,7 @@ const ensureAtPolyfills = () => {
 
 const loadJsPdfConstructor = async () => {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
-        throw new Error('A gera\u00e7\u00e3o de PDF est\u00e1 dispon\u00edvel apenas no navegador.');
+        throw new Error('A geração de PDF está disponível apenas no navegador.');
     }
 
     ensureAtPolyfills();
@@ -61,7 +61,7 @@ const loadJsPdfConstructor = async () => {
 
                 if (existingScript.dataset.loaded === 'true') {
                     jsPdfLoaderPromise = null;
-                    reject(new Error('Biblioteca de PDF indispon\u00edvel ap\u00f3s o carregamento.'));
+                    reject(new Error('Biblioteca de PDF indisponível após o carregamento.'));
                     return;
                 }
 
@@ -93,7 +93,7 @@ const loadJsPdfConstructor = async () => {
 
     if (!jsPdfConstructor) {
         jsPdfLoaderPromise = null;
-        throw new Error('Biblioteca de PDF indispon\u00edvel no carregamento.');
+        throw new Error('Biblioteca de PDF indisponível no carregamento.');
     }
 
     return jsPdfConstructor;
@@ -115,14 +115,14 @@ const COLORS = {
 
 const CHART_COLORS = ['#1F3A5F', '#2F5D8C', '#4A90C2', '#64748B', '#93C5FD', '#60A5FA', '#CBD5E1'];
 const ESSENTIAL_CATEGORIES = new Set([
-    'Alimenta\u00e7\u00e3o',
+    'Alimentação',
     'Bebidas',
     'Higiene e Limpeza',
     'Hortifruti',
-    'A\u00e7ougue e Frios',
+    'Açougue e Frios',
     'Padaria e Lanches',
-    'Farm\u00e1cia e Sa\u00fade',
-    'Combust\u00edvel'
+    'Farmácia e Saúde',
+    'Combustível'
 ]);
 
 const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -149,7 +149,7 @@ const safeDate = (value) => {
 
 const formatDate = (value) => {
     const date = safeDate(value);
-    return date ? dateFormatter.format(date) : 'Data inv\u00e1lida';
+    return date ? dateFormatter.format(date) : 'Data inválida';
 };
 
 const formatAxisDate = (value) => {
@@ -293,7 +293,7 @@ const buildFlowData = (receipts, products) => {
 
     products.forEach((product) => {
         const receipt = receiptMap.get(product.receiptId);
-        const source = receipt?.establishment || 'Origem n\u00e3o identificada';
+        const source = receipt?.establishment || 'Origem não identificada';
         const target = product.category || 'Outros';
         const key = `${source}|||${target}`;
         flowMap[key] = (flowMap[key] || 0) + (Number(product.totalValue) || 0);
@@ -330,7 +330,7 @@ const buildPriceHistogram = (products) => {
     const thresholds = [5, 10, 20, 50, 100, 500];
     const buckets = [
         ...thresholds.map((threshold) => ({
-            name: `At\u00e9 ${formatCurrency(threshold)}`,
+            name: `Até ${formatCurrency(threshold)}`,
             count: 0
         })),
         { name: `Acima de ${formatCurrency(500)}`, count: 0 }
@@ -369,8 +369,8 @@ const buildReceiptTicketHistogram = (receipts) => {
 };
 
 const buildHeatmapData = (receipts) => {
-    const weekdayMap = { Seg: 0, Ter: 0, Qua: 0, Qui: 0, Sex: 0, 'S\u00e1b': 0, Dom: 0 };
-    const weekdayKeys = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'S\u00e1b'];
+    const weekdayMap = { Seg: 0, Ter: 0, Qua: 0, Qui: 0, Sex: 0, 'Sáb': 0, Dom: 0 };
+    const weekdayKeys = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
     receipts.forEach((receipt) => {
         const date = safeDate(receipt.date);
@@ -395,7 +395,7 @@ const buildTemporalProjection = (temporalData) => {
 
     let direction = 'estabilidade';
     if (recentAverage > previousAverage * 1.08) direction = 'alta';
-    if (recentAverage < previousAverage * 0.92) direction = 'redu\u00e7\u00e3o';
+    if (recentAverage < previousAverage * 0.92) direction = 'redução';
 
     return {
         direction,
@@ -552,7 +552,7 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
     const paymentMethodSummaryData = Array.isArray(stats?.paymentMethodSummaryData)
         ? stats.paymentMethodSummaryData
             .map((item) => ({
-                name: item.name || 'N\u00e3o informado',
+                name: item.name || 'Não informado',
                 value: Number(item.value) || 0,
                 categoryCount: Number(item.categoryCount) || 0
             }))
@@ -563,7 +563,7 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
         ? stats.categoryPaymentMethodData
             .map((item) => ({
                 category: item.category || 'Outros',
-                paymentMethod: item.paymentMethod || 'N\u00e3o informado',
+                paymentMethod: item.paymentMethod || 'Não informado',
                 value: Number(item.value) || 0,
                 receiptCount: Number(item.receiptCount) || 0,
                 categoryShare: Number(item.categoryShare) || 0
@@ -601,11 +601,11 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
         ) * 100
         : 0;
 
-    let profile = 'Consumidor equilibrado com padr\u00e3o diversificado';
+    let profile = 'Consumidor equilibrado com padrão diversificado';
     if (lowTicketShare > 55 && temporalProjection.direction === 'alta') {
-        profile = 'Consumidor recorrente com tra\u00e7os impulsivos';
+        profile = 'Consumidor recorrente com traços impulsivos';
     } else if (essentialShare > 60) {
-        profile = 'Consumidor conservador e orientado a necessidades b\u00e1sicas';
+        profile = 'Consumidor conservador e orientado a necessidades básicas';
     } else if ((categoryComposition[0]?.percentage || 0) > 40) {
         profile = 'Consumidor concentrado em poucos centros de custo';
     }
@@ -1020,7 +1020,7 @@ const drawMultiScenarioProjectionChart = ({
 }) => {
     const { canvas, context } = createCanvas(width, height);
     if (!data || !data.length) {
-        drawEmptyState(context, canvas.width, canvas.height, title, subtitle, 'Sem dados de proje\u00e7\u00e3o');
+        drawEmptyState(context, canvas.width, canvas.height, title, subtitle, 'Sem dados de projeção');
         return canvas;
     }
 
@@ -1107,7 +1107,7 @@ const drawMultiScenarioProjectionChart = ({
     };
 
     addLegendItem('Gasto Real', COLORS.navy);
-    addLegendItem('Prov\u00e1vel', COLORS.blue, true);
+    addLegendItem('Provável', COLORS.blue, true);
     addLegendItem('Conservador', '#2E7D32', true);
     addLegendItem('Picos', '#D84315', true);
 
@@ -1378,8 +1378,8 @@ const drawParetoChart = (paretoData) => {
             context,
             canvas.width,
             canvas.height,
-            'Gr\u00e1fico de Pareto (Top 10 Produtos)',
-            'Concentra\u00e7\u00e3o acumulada do gasto por produto',
+            'Gráfico de Pareto (Top 10 Produtos)',
+            'Concentração acumulada do gasto por produto',
             'Sem dados suficientes'
         );
         return canvas;
@@ -1389,8 +1389,8 @@ const drawParetoChart = (paretoData) => {
         context,
         canvas.width,
         canvas.height,
-        'Gr\u00e1fico de Pareto (Top 10 Produtos)',
-        'Concentra\u00e7\u00e3o acumulada do gasto por produto'
+        'Gráfico de Pareto (Top 10 Produtos)',
+        'Concentração acumulada do gasto por produto'
     );
 
     const area = { left: 90, top: 100, width: canvas.width - 180, height: canvas.height - 210 };
@@ -1546,8 +1546,8 @@ const drawTreemapChart = (treemapData, totalSpent) => {
 };
 
 const drawCompositionChart = (categoryComposition) => drawDonutChart({
-    title: 'Composi\u00e7\u00e3o por Categorias',
-    subtitle: 'Distribui\u00e7\u00e3o percentual por centros de custo',
+    title: 'Composição por Categorias',
+    subtitle: 'Distribuição percentual por centros de custo',
     data: categoryComposition,
     valueFormatter: formatCurrency,
     centerValue: '100%',
@@ -1693,8 +1693,8 @@ const addFooter = (pdf) => {
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(9);
         pdf.setTextColor(COLORS.muted);
-        pdf.text(`Relat\u00f3rio gerado automaticamente em ${dateFormatter.format(new Date())}`, 40, pageHeight - 22);
-        pdf.text(`P\u00e1gina ${page} de ${pageCount}`, pageWidth - 100, pageHeight - 22);
+        pdf.text(`Relatório gerado automaticamente em ${dateFormatter.format(new Date())}`, 40, pageHeight - 22);
+        pdf.text(`Página ${page} de ${pageCount}`, pageWidth - 100, pageHeight - 22);
     }
 };
 
@@ -1854,31 +1854,31 @@ const addInflationOverviewPage = (pdf, reportTitle, reportData, insights) => {
     const topCategory = reportData.inflation.categoryInflationData[0];
 
     pdf.addPage();
-    addPageHeader(pdf, reportTitle, '\u00cdndice de Infla\u00e7\u00e3o Pessoal');
+    addPageHeader(pdf, reportTitle, 'Índice de Inflação Pessoal');
 
     pdf.setTextColor(COLORS.text);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(18);
-    pdf.text('\u00cdndice de Infla\u00e7\u00e3o Pessoal', 40, 102);
+    pdf.text('Índice de Inflação Pessoal', 40, 102);
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(10);
     pdf.setTextColor(COLORS.muted);
     pdf.text(
-        'Comparativo entre o \u00faltimo pre\u00e7o e o pre\u00e7o anterior dos produtos compar\u00e1veis no per\u00edodo filtrado.',
+        'Comparativo entre o último preço e o preço anterior dos produtos comparáveis no período filtrado.',
         40,
         120
     );
 
     const metricWidth = (515 - 24) / 3;
-    addSummaryCard(pdf, '\u00cdndice geral', formatSignedRatioPercent(reportData.inflation.personalInflationRate), 40, 144, metricWidth);
+    addSummaryCard(pdf, 'Índice geral', formatSignedRatioPercent(reportData.inflation.personalInflationRate), 40, 144, metricWidth);
     addSummaryCard(pdf, 'Impacto financeiro', formatCurrency(reportData.inflation.totalInflationImpact), 40 + metricWidth + 12, 144, metricWidth);
-    addSummaryCard(pdf, 'Produtos compar\u00e1veis', `${reportData.inflation.comparableProductsCount}`, 40 + (metricWidth + 12) * 2, 144, metricWidth);
+    addSummaryCard(pdf, 'Produtos comparáveis', `${reportData.inflation.comparableProductsCount}`, 40 + (metricWidth + 12) * 2, 144, metricWidth);
 
     addNarrativeCard(pdf, 'Leitura executiva', insights.inflation.comportamento, 40, 236, 515, 92, COLORS.blue);
     addNarrativeCard(
         pdf,
         'Metodologia',
-        '\u00cdndice geral: (pre\u00e7o atual - pre\u00e7o anterior) / pre\u00e7o anterior. Impacto financeiro: (pre\u00e7o atual - pre\u00e7o anterior) x quantidade atual.',
+        'Índice geral: (preço atual - preço anterior) / preço anterior. Impacto financeiro: (preço atual - preço anterior) x quantidade atual.',
         40,
         340,
         515,
@@ -1887,10 +1887,10 @@ const addInflationOverviewPage = (pdf, reportTitle, reportData, insights) => {
     );
     addNarrativeCard(
         pdf,
-        'Produto com maior press\u00e3o',
+        'Produto com maior pressão',
         topProduct
-            ? `${topProduct.name} | ${topProduct.category} | ${formatDate(topProduct.previousDate)} at\u00e9 ${formatDate(topProduct.currentDate)} | infla\u00e7\u00e3o ${formatSignedRatioPercent(topProduct.inflationRate)} | impacto ${formatCurrency(topProduct.financialImpact)}.`
-            : 'N\u00e3o h\u00e1 produto com base compar\u00e1vel suficiente no per\u00edodo.',
+            ? `${topProduct.name} | ${topProduct.category} | ${formatDate(topProduct.previousDate)} até ${formatDate(topProduct.currentDate)} | inflação ${formatSignedRatioPercent(topProduct.inflationRate)} | impacto ${formatCurrency(topProduct.financialImpact)}.`
+            : 'Não há produto com base comparável suficiente no período.',
         40,
         440,
         251,
@@ -1899,43 +1899,43 @@ const addInflationOverviewPage = (pdf, reportTitle, reportData, insights) => {
     );
     addNarrativeCard(
         pdf,
-        'Categoria com maior press\u00e3o',
+        'Categoria com maior pressão',
         topCategory
-            ? `${topCategory.name} lidera com ${topCategory.comparableProducts} produtos compar\u00e1veis, infla\u00e7\u00e3o de ${formatSignedRatioPercent(topCategory.inflationRate)} e impacto de ${formatCurrency(topCategory.financialImpact)}.`
-            : 'N\u00e3o h\u00e1 categoria com base compar\u00e1vel suficiente no per\u00edodo.',
+            ? `${topCategory.name} lidera com ${topCategory.comparableProducts} produtos comparáveis, inflação de ${formatSignedRatioPercent(topCategory.inflationRate)} e impacto de ${formatCurrency(topCategory.financialImpact)}.`
+            : 'Não há categoria com base comparável suficiente no período.',
         304,
         440,
         251,
         118,
         COLORS.navy
     );
-    addNarrativeCard(pdf, 'Tend\u00eancia observada', insights.inflation.tendencia, 40, 570, 515, 92, COLORS.blue);
+    addNarrativeCard(pdf, 'Tendência observada', insights.inflation.tendencia, 40, 570, 515, 92, COLORS.blue);
 };
 
 const addChartPage = (pdf, reportTitle, pageTitle, canvas, insights) => {
     addPageHeader(pdf, reportTitle, pageTitle);
     pdf.addImage(canvas.toDataURL('image/png', 1), 'PNG', 40, 92, 515, 220, undefined, 'FAST');
-    addInsightBlock(pdf, 'Finalidade do gr\u00e1fico', insights.finalidade, 40, 335, 515, COLORS.blue);
-    addInsightBlock(pdf, 'An\u00e1lise de comportamento', insights.comportamento, 40, 475, 515, COLORS.cyan);
-    addInsightBlock(pdf, 'Tend\u00eancia de consumo', insights.tendencia, 40, 615, 515, COLORS.slate);
+    addInsightBlock(pdf, 'Finalidade do gráfico', insights.finalidade, 40, 335, 515, COLORS.blue);
+    addInsightBlock(pdf, 'Análise de comportamento', insights.comportamento, 40, 475, 515, COLORS.cyan);
+    addInsightBlock(pdf, 'Tendência de consumo', insights.tendencia, 40, 615, 515, COLORS.slate);
 };
 
 const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
-    addPageHeader(pdf, reportTitle, 'Algoritmo de Previs\u00e3o de Gastos');
+    addPageHeader(pdf, reportTitle, 'Algoritmo de Previsão de Gastos');
     
     pdf.setTextColor(COLORS.text);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(18);
-    pdf.text('Algoritmo de Previs\u00e3o de Alta Precis\u00e3o', 40, 102);
+    pdf.text('Algoritmo de Previsão de Alta Precisão', 40, 102);
     
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(COLORS.text);
-    pdf.text('RELAT\u00d3RIO DE RISCO E PREVIS\u00c3O (PADR\u00c3O BANC\u00c1RIO)\nAn\u00e1lise h\u00edbrida de s\u00e9ries temporais (Holt-Winters) e Run Rate para previs\u00e3o com meta de 92% de precis\u00e3o.', 40, 122);
+    pdf.text('RELATÓRIO DE RISCO E PREVISÃO (PADRÃO BANCÁRIO)\nAnálise híbrida de séries temporais (Holt-Winters) e Run Rate para previsão com meta de 92% de precisão.', 40, 122);
     
     const columns = [
-        { label: 'Cen\u00e1rio', width: 100 },
-        { label: 'Descri\u00e7\u00e3o da L\u00f3gica', width: 315 },
+        { label: 'Cenário', width: 100 },
+        { label: 'Descrição da Lógica', width: 315 },
         { label: 'Valor Previsto', width: 100 }
     ];
     
@@ -1943,7 +1943,7 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     if (scenarios) {
         const rows = [
             { name: 'Conservador', logic: scenarios.conservador.description, value: formatCurrency(scenarios.conservador.value) },
-            { name: 'Prov\u00e1vel', logic: scenarios.provavel.description, value: formatCurrency(scenarios.provavel.value), isBold: true },
+            { name: 'Provável', logic: scenarios.provavel.description, value: formatCurrency(scenarios.provavel.value), isBold: true },
             { name: 'Se repetir picos', logic: scenarios.picos.description, value: formatCurrency(scenarios.picos.value) }
         ];
         
@@ -1957,14 +1957,14 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
         pdf.setFont('helvetica', 'italic');
         pdf.setFontSize(9);
         pdf.setTextColor(COLORS.muted);
-        pdf.text('A an\u00e1lise considera sazonalidade, Run Rate e elasticidade de categorias.', 40, currentY + 20);
+        pdf.text('A análise considera sazonalidade, Run Rate e elasticidade de categorias.', 40, currentY + 20);
     } else {
-        pdf.text('Dados de proje\u00e7\u00e3o insuficientes para o m\u00eas atual.', 40, 180);
+        pdf.text('Dados de projeção insuficientes para o mês atual.', 40, 180);
     }
 
     const chartCanvas = drawMultiScenarioProjectionChart({
-        title: 'Curva de Tend\u00eancia e Riscos',
-        subtitle: 'Proje\u00e7\u00e3o de fechamento sob diferentes cen\u00e1rios de consumo',
+        title: 'Curva de Tendência e Riscos',
+        subtitle: 'Projeção de fechamento sob diferentes cenários de consumo',
         data: reportData.monthInsight?.projectionChartData || [],
         totalDays: reportData.monthInsight?.totalDaysInMonth || 30
     });
@@ -1972,11 +1972,11 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     pdf.addImage(chartCanvas.toDataURL('image/png', 1), 'PNG', 40, 260, 515, 180, undefined, 'FAST');
 
     addInsightBlock(pdf, 'Leitura de Risco', insights.projection.comportamento, 40, 460, 515, COLORS.blue);
-    addInsightBlock(pdf, 'Tend\u00eancia e Ajustes', insights.projection.tendencia, 40, 570, 515, COLORS.cyan);
+    addInsightBlock(pdf, 'Tendência e Ajustes', insights.projection.tendencia, 40, 570, 515, COLORS.cyan);
     
     addNarrativeCard(
         pdf, 
-        'Conclus\u00e3o da An\u00e1lise', 
+        'Conclusão da Análise', 
         insights.projection.tendencia + ' ' + (reportData.monthInsight?.outlookSentence || ''), 
         40, 680, 515, 80, COLORS.navy
     );
@@ -1997,7 +1997,7 @@ export const generateConsumptionAnalysisPdf = async ({
     monthInsight = null
 }) => {
     if (!receipts.length || !products.length) {
-        throw new Error('N\u00e3o h\u00e1 dados suficientes para gerar o relat\u00f3rio.');
+        throw new Error('Não há dados suficientes para gerar o relatório.');
     }
 
     const JsPDF = await loadJsPdfConstructor();
@@ -2016,14 +2016,14 @@ export const generateConsumptionAnalysisPdf = async ({
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(COLORS.muted);
-    pdf.text(`Per\u00edodo analisado: ${insights.summary.periodLabel}`, 40, 132);
+    pdf.text(`Período analisado: ${insights.summary.periodLabel}`, 40, 132);
     pdf.text(`Base de dados: ${receipts.length} cupons fiscais e ${products.length} itens processados`, 40, 148);
 
     const cardWidth = (pageWidth - 100) / 2;
     [
         ['Total analisado', formatCurrency(reportData.totalSpent)],
         ['Cupons processados', `${reportData.receipts.length}`],
-        ['Ticket m\u00e9dio', formatCurrency(avgTicket)],
+        ['Ticket médio', formatCurrency(avgTicket)],
         ['Perfil inferido', reportData.profile]
     ].forEach(([label, value], index) => {
         const x = 40 + (index % 2) * (cardWidth + 20);
@@ -2036,30 +2036,30 @@ export const generateConsumptionAnalysisPdf = async ({
     pdf.setTextColor(COLORS.text);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(13);
-    pdf.text('S\u00edntese estrat\u00e9gica', 56, 396);
+    pdf.text('Síntese estratégica', 56, 396);
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
     pdf.text(
         pdf.splitTextToSize(
-            `${insights.summary.highlights.join(' ')} A proje\u00e7\u00e3o temporal aponta ${reportData.temporalProjection.direction} do gasto agregado, enquanto a composi\u00e7\u00e3o por categorias ajuda a antecipar prioridades or\u00e7ament\u00e1rias de curto prazo.`,
+            `${insights.summary.highlights.join(' ')} A projeção temporal aponta ${reportData.temporalProjection.direction} do gasto agregado, enquanto a composição por categorias ajuda a antecipar prioridades orçamentárias de curto prazo.`,
             487
         ),
         56,
         418
     );
 
-    addNarrativeCard(pdf, 'Concentra\u00e7\u00e3o do gasto', insights.summary.concentrationNote, 40, 508, 251, 110, COLORS.blue);
-    addNarrativeCard(pdf, 'Recorr\u00eancia di\u00e1ria', insights.summary.recurrenceNote, 304, 508, 251, 110, COLORS.cyan);
-    addNarrativeCard(pdf, 'Leitura inflacion\u00e1ria', insights.summary.inflationNote, 40, 632, 515, 96, COLORS.slate);
+    addNarrativeCard(pdf, 'Concentração do gasto', insights.summary.concentrationNote, 40, 508, 251, 110, COLORS.blue);
+    addNarrativeCard(pdf, 'Recorrência diária', insights.summary.recurrenceNote, 304, 508, 251, 110, COLORS.cyan);
+    addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, 632, 515, 96, COLORS.slate);
 
     addProjectionAnalysisPage(pdf, insights.summary.title, reportData, insights);
 
     const chartPages = [
         {
-            title: 'Evolu\u00e7\u00e3o dos Gastos ao Longo do Tempo',
+            title: 'Evolução dos Gastos ao Longo do Tempo',
             canvas: drawLineAreaChart({
-                title: 'Evolu\u00e7\u00e3o dos Gastos ao Longo do Tempo',
-                subtitle: 'Somat\u00f3rio di\u00e1rio do consumo no per\u00edodo',
+                title: 'Evolução dos Gastos ao Longo do Tempo',
+                subtitle: 'Somatório diário do consumo no período',
                 data: reportData.temporalData,
                 valueKey: 'value',
                 labelKey: 'date',
@@ -2072,10 +2072,10 @@ export const generateConsumptionAnalysisPdf = async ({
             insights: insights.temporal
         },
         {
-            title: 'Distribui\u00e7\u00e3o por Loja (%)',
+            title: 'Distribuição por Loja (%)',
             canvas: drawDonutChart({
-                title: 'Distribui\u00e7\u00e3o por Loja (%)',
-                subtitle: 'Participa\u00e7\u00e3o financeira dos principais estabelecimentos',
+                title: 'Distribuição por Loja (%)',
+                subtitle: 'Participação financeira dos principais estabelecimentos',
                 data: reportData.storeData.map((item) => ({
                     ...item,
                     percentage: safeRatio(item.value, reportData.totalSpent) * 100
@@ -2104,10 +2104,10 @@ export const generateConsumptionAnalysisPdf = async ({
             insights: insights.storeComparison
         },
         {
-            title: 'Gastos por Loja x M\u00eas',
+            title: 'Gastos por Loja x Mês',
             canvas: drawStackedBarChart({
-                title: 'Gastos por Loja x M\u00eas',
-                subtitle: 'Participa\u00e7\u00e3o mensal das principais lojas',
+                title: 'Gastos por Loja x Mês',
+                subtitle: 'Participação mensal das principais lojas',
                 data: reportData.stackedData,
                 series: reportData.topStores
             }),
@@ -2130,7 +2130,7 @@ export const generateConsumptionAnalysisPdf = async ({
             insights: insights.accumulated
         },
         {
-            title: 'Gr\u00e1fico de Pareto (Top 10 Produtos)',
+            title: 'Gráfico de Pareto (Top 10 Produtos)',
             canvas: drawParetoChart(reportData.paretoData),
             insights: insights.pareto
         },
@@ -2138,7 +2138,7 @@ export const generateConsumptionAnalysisPdf = async ({
             title: 'Top 5 Produtos Recorrentes',
             canvas: drawHorizontalBarChart({
                 title: 'Top 5 Produtos Recorrentes',
-                subtitle: 'Frequ\u00eancia de compras de cada produto e o impacto (em compras)',
+                subtitle: 'Frequência de compras de cada produto e o impacto (em compras)',
                 data: reportData.topRecurringProducts,
                 labelKey: 'name',
                 valueKey: 'recurrenceCount',
@@ -2158,7 +2158,7 @@ export const generateConsumptionAnalysisPdf = async ({
             title: 'Gastos por Categoria (%)',
             canvas: drawHorizontalBarChart({
                 title: 'Gastos por Categoria (%)',
-                subtitle: 'Participa\u00e7\u00e3o percentual das categorias no gasto total',
+                subtitle: 'Participação percentual das categorias no gasto total',
                 data: reportData.categoryComposition,
                 labelKey: 'name',
                 valueKey: 'percentage',
@@ -2170,10 +2170,10 @@ export const generateConsumptionAnalysisPdf = async ({
             insights: insights.categories
         },
         {
-            title: 'Histograma de Pre\u00e7os',
+            title: 'Histograma de Preços',
             canvas: drawVerticalBarChart({
-                title: 'Histograma de Pre\u00e7os',
-                subtitle: 'Distribui\u00e7\u00e3o dos itens por faixa de pre\u00e7o unit\u00e1rio',
+                title: 'Histograma de Preços',
+                subtitle: 'Distribuição dos itens por faixa de preço unitário',
                 data: reportData.priceHistogramData,
                 valueKey: 'count',
                 labelKey: 'name',
@@ -2184,7 +2184,7 @@ export const generateConsumptionAnalysisPdf = async ({
             insights: insights.priceHistogram
         },
         {
-            title: 'Composi\u00e7\u00e3o por Categorias',
+            title: 'Composição por Categorias',
             canvas: drawCompositionChart(reportData.categoryComposition),
             insights: insights.composition
         },
@@ -2197,7 +2197,7 @@ export const generateConsumptionAnalysisPdf = async ({
             title: 'Mapa de Calor (Dias da Semana)',
             canvas: drawVerticalBarChart({
                 title: 'Mapa de Calor (Dias da Semana)',
-                subtitle: 'Incid\u00eancia de compras ao longo da semana',
+                subtitle: 'Incidência de compras ao longo da semana',
                 data: reportData.heatmapData,
                 valueKey: 'value',
                 labelKey: 'name',
@@ -2211,9 +2211,9 @@ export const generateConsumptionAnalysisPdf = async ({
             insights: insights.heatmap
         },
         {
-            title: 'Histograma de Frequ\u00eancia por Cupom',
+            title: 'Histograma de Frequência por Cupom',
             canvas: drawVerticalBarChart({
-                title: 'Histograma de Frequ\u00eancia por Cupom',
+                title: 'Histograma de Frequência por Cupom',
                 subtitle: 'Faixas de valor total por cupom fiscal',
                 data: reportData.receiptHistogramData.map((item) => ({
                     name: item.label,
@@ -2240,14 +2240,14 @@ export const generateConsumptionAnalysisPdf = async ({
     addPaginatedTable({
         pdf,
         reportTitle: insights.summary.title,
-        pageTitle: 'Infla\u00e7\u00e3o por Produto',
-        introText: 'Tabela completa dos produtos compar\u00e1veis usados no c\u00e1lculo do \u00edndice de infla\u00e7\u00e3o pessoal.',
+        pageTitle: 'Inflação por Produto',
+        introText: 'Tabela completa dos produtos comparáveis usados no cálculo do índice de inflação pessoal.',
         columns: [
             { label: 'Produto', width: 190 },
-            { label: 'Per\u00edodo', width: 88 },
+            { label: 'Período', width: 88 },
             { label: 'Anterior', width: 58 },
             { label: 'Atual', width: 58 },
-            { label: 'Infla\u00e7\u00e3o', width: 55, color: getVariationColor },
+            { label: 'Inflação', width: 55, color: getVariationColor },
             { label: 'Impacto', width: 66 }
         ],
         rows: reportData.inflation.productInflationData,
@@ -2263,19 +2263,19 @@ export const generateConsumptionAnalysisPdf = async ({
             formatSignedRatioPercent(item.inflationRate),
             formatCurrency(item.financialImpact)
         ],
-        emptyMessage: 'Ainda n\u00e3o h\u00e1 produtos com pelo menos dois registros de pre\u00e7o em datas diferentes no per\u00edodo analisado.'
+        emptyMessage: 'Ainda não há produtos com pelo menos dois registros de preço em datas diferentes no período analisado.'
     });
 
     pdf.addPage();
     addPaginatedTable({
         pdf,
         reportTitle: insights.summary.title,
-        pageTitle: 'Infla\u00e7\u00e3o por Categoria',
-        introText: 'Agrupamento das varia\u00e7\u00f5es de pre\u00e7o por categoria com base nos mesmos produtos compar\u00e1veis do \u00edndice de infla\u00e7\u00e3o pessoal.',
+        pageTitle: 'Inflação por Categoria',
+        introText: 'Agrupamento das variações de preço por categoria com base nos mesmos produtos comparáveis do índice de inflação pessoal.',
         columns: [
             { label: 'Categoria', width: 230 },
             { label: 'Produtos', width: 70 },
-            { label: 'Infla\u00e7\u00e3o', width: 90, color: getVariationColor },
+            { label: 'Inflação', width: 90, color: getVariationColor },
             { label: 'Impacto', width: 125 }
         ],
         rows: reportData.inflation.categoryInflationData,
@@ -2285,7 +2285,7 @@ export const generateConsumptionAnalysisPdf = async ({
             formatSignedRatioPercent(item.inflationRate),
             formatCurrency(item.financialImpact)
         ],
-        emptyMessage: 'Ainda n\u00e3o h\u00e1 categorias com base compar\u00e1vel suficiente para o per\u00edodo analisado.'
+        emptyMessage: 'Ainda não há categorias com base comparável suficiente para o período analisado.'
     });
 
     addFooter(pdf);

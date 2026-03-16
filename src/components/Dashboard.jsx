@@ -949,18 +949,18 @@ const Dashboard = () => {
             dominantPaymentShare: dominantPaymentMethod?.share || 0
         });
 
-        const outlookSentence = `At\u00e9 ${formatMonthDayLabel(currentDateKey)}, o m\u00eas de ${monthLabel} acumula ${formatCurrencyValue(monthTotalSpent)}. Mantido o ritmo m\u00e9dio de ${formatCurrencyValue(averageDailySpend)} por dia corrido, o fechamento estimado \u00e9 de ${formatCurrencyValue(projectedTotal)}, com mais ${formatCurrencyValue(projectedAdditionalSpend)} at\u00e9 o \u00faltimo dia.`;
+        const outlookSentence = `Até ${formatMonthDayLabel(currentDateKey)}, o mês de ${monthLabel} acumula ${formatCurrencyValue(monthTotalSpent)}. Mantido o ritmo médio de ${formatCurrencyValue(averageDailySpend)} por dia corrido, o fechamento estimado é de ${formatCurrencyValue(projectedTotal)}, com mais ${formatCurrencyValue(projectedAdditionalSpend)} até o último dia.`;
         const concentrationSentence = topCategory && topStore
-            ? `${topCategory.name} lidera com ${formatSharePercent(topCategory.share)} do m\u00eas, enquanto ${topStore.name} concentra ${formatSharePercent(topStore.share)} do valor movimentado.`
-            : 'A distribui\u00e7\u00e3o atual ainda est\u00e1 pouco concentrada entre categorias e estabelecimentos.';
+            ? `${topCategory.name} lidera com ${formatSharePercent(topCategory.share)} do mês, enquanto ${topStore.name} concentra ${formatSharePercent(topStore.share)} do valor movimentado.`
+            : 'A distribuição atual ainda está pouco concentrada entre categorias e estabelecimentos.';
         const paymentSentence = dominantPaymentMethod
             ? `${dominantPaymentMethod.name} aparece como principal alavanca de pagamento com ${formatSharePercent(dominantPaymentMethod.share)} do total.`
-            : 'Ainda n\u00e3o h\u00e1 uma forma de pagamento dominante no m\u00eas.';
+            : 'Ainda não há uma forma de pagamento dominante no mês.';
         const actionSentence = paceChange > 0.12
-            ? 'Como a curva recente acelerou, o melhor ponto de controle est\u00e1 nas categorias l\u00edderes e nos gastos de reposi\u00e7\u00e3o recorrente, para evitar um fechamento acima da percep\u00e7\u00e3o atual.'
+            ? 'Como a curva recente acelerou, o melhor ponto de controle está nas categorias líderes e nos gastos de reposição recorrente, para evitar um fechamento acima da percepção atual.'
             : essentialShare >= 0.62
-                ? 'Como a maior parte do gasto est\u00e1 em categorias essenciais, a estrat\u00e9gia mais eficaz \u00e9 revisar frequ\u00eancia de compra, marcas e reposi\u00e7\u00f5es para preservar margem sem cortar itens-chave.'
-                : 'Com um padr\u00e3o mais distribu\u00eddo, o maior ganho de previsibilidade vem de acompanhar estabelecimentos e meios de pagamento com maior peso financeiro.';
+                ? 'Como a maior parte do gasto está em categorias essenciais, a estratégia mais eficaz é revisar frequência de compra, marcas e reposições para preservar margem sem cortar itens-chave.'
+                : 'Com um padrão mais distribuído, o maior ganho de previsibilidade vem de acompanhar estabelecimentos e meios de pagamento com maior peso financeiro.';
 
         return {
             hasData: true,
@@ -996,15 +996,15 @@ const Dashboard = () => {
             scenarios: {
                 conservador: {
                     value: monthTotalSpent + (Math.min(recentAverage, averageDailySpend) * 0.92 * remainingDays),
-                    description: 'Baseado na m\u00e9dia m\u00f3vel suavizada e redu\u00e7\u00e3o de gastos impulsivos.'
+                    description: 'Baseado na média móvel suavizada e redução de gastos impulsivos.'
                 },
                 provavel: {
                     value: projectedTotal * (1 + (paceChange * 0.08)), // Slight adjustment based on trend
-                    description: 'Ponto de equil\u00edbrio entre Holt-Winters e o Run Rate atual (92% de confian\u00e7a).'
+                    description: 'Ponto de equilíbrio entre Holt-Winters e o Run Rate atual (92% de confiança).'
                 },
                 picos: {
                     value: Math.max(projectedTotal * 1.15, monthTotalSpent + (Math.max(...dailyTotals.map(d => d.value), averageDailySpend) * remainingDays)),
-                    description: 'Considera a reocorr\u00eancia de gastos m\u00e1ximos sazonais detectados no hist\u00f3rico.'
+                    description: 'Considera a reocorrência de gastos máximos sazonais detectados no histórico.'
                 }
             }
         };
@@ -1194,9 +1194,9 @@ const Dashboard = () => {
                         <LineIcon size={18} />
                     </div>
                     <div>
-                        <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Proje\u00e7\u00e3o de Fechamento do M\u00eas</h4>
+                        <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Projeção de Fechamento do Mês</h4>
                         <p style={{ margin: '4px 0 0', color: 'var(--text-light)', fontSize: '0.82rem', lineHeight: 1.45 }}>
-                            Cruza lan\u00e7amentos manuais e cupons importados do m\u00eas atual para estimar o fechamento, identificar o perfil do consumidor e consolidar uma s\u00edntese estrat\u00e9gica.
+                            Cruza lançamentos manuais e cupons importados do mês atual para estimar o fechamento, identificar o perfil do consumidor e consolidar uma síntese estratégica.
                         </p>
                     </div>
                 </div>
@@ -1206,7 +1206,7 @@ const Dashboard = () => {
                 <>
                     <div style={{ ...RESPONSIVE_SUMMARY_GRID, marginBottom: '20px' }}>
                         <div style={{ padding: '16px', borderRadius: '16px', background: 'rgba(26, 35, 126, 0.06)' }}>
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-light)', marginBottom: '6px' }}>Acumulado no m\u00eas</div>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-light)', marginBottom: '6px' }}>Acumulado no mês</div>
                             <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--primary-blue)' }}>
                                 {formatCurrencyValue(currentMonthInsight.monthTotalSpent)}
                             </div>
@@ -1221,7 +1221,7 @@ const Dashboard = () => {
                                 {formatCurrencyValue(currentMonthInsight.projectedTotal)}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                Proje\u00e7\u00e3o estat\u00edstica at\u00e9 o fim do m\u00eas.
+                                Projeção estatística até o fim do mês.
                             </div>
                         </div>
 
@@ -1231,7 +1231,7 @@ const Dashboard = () => {
                                 {formatCurrencyValue(currentMonthInsight.projectedAdditionalSpend)}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                Estimativa para os pr\u00f3ximos {currentMonthInsight.remainingDays} dias.
+                                Estimativa para os próximos {currentMonthInsight.remainingDays} dias.
                             </div>
                         </div>
 
@@ -1257,10 +1257,10 @@ const Dashboard = () => {
                         >
                             <div style={{ marginBottom: '20px' }}>
                                 <h5 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--primary-blue)', fontWeight: 800 }}>
-                                    Algoritmo de Previs\u00e3o de Gastos de Alta Precis\u00e3o (Padr\u00e3o Banc\u00e1rio)
+                                    Algoritmo de Previsão de Gastos de Alta Precisão (Padrão Bancário)
                                 </h5>
                                 <p style={{ margin: '10px 0', color: 'var(--text-dark)', fontSize: '0.86rem', lineHeight: 1.6, fontWeight: 500 }}>
-                                    An\u00e1lise h\u00edbrida de s\u00e9ries temporais (Holt-Winters), M\u00e9dia M\u00f3vel Estabilizadora e Run Rate para previs\u00e3o com meta de 92% de precis\u00e3o, seguindo metodologias de an\u00e1lise de risco das maiores institui\u00e7\u00f5es financeiras globais.
+                                    Análise híbrida de séries temporais (Holt-Winters), Média Móvel Estabilizadora e Run Rate para previsão com meta de 92% de precisão, seguindo metodologias de análise de risco das maiores instituições financeiras globais.
                                 </p>
                             </div>
 
@@ -1308,7 +1308,7 @@ const Dashboard = () => {
                                         
                                         {/* Scenario: Provável */}
                                         <Line 
-                                            name="Prov\u00e1vel" 
+                                            name="Provável" 
                                             type="monotone" 
                                             dataKey="provavel" 
                                             stroke="var(--primary-blue)" 
@@ -1348,8 +1348,8 @@ const Dashboard = () => {
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                                     <thead>
                                         <tr style={{ borderBottom: '2px solid rgba(26, 35, 126, 0.1)' }}>
-                                            <th style={{ textAlign: 'left', padding: '12px 8px', color: 'var(--primary-blue)' }}>Cen\u00e1rio</th>
-                                            <th style={{ textAlign: 'left', padding: '12px 8px', color: 'var(--primary-blue)' }}>Descri\u00e7\u00e3o da L\u00f3gica</th>
+                                            <th style={{ textAlign: 'left', padding: '12px 8px', color: 'var(--primary-blue)' }}>Cenário</th>
+                                            <th style={{ textAlign: 'left', padding: '12px 8px', color: 'var(--primary-blue)' }}>Descrição da Lógica</th>
                                             <th style={{ textAlign: 'right', padding: '12px 8px', color: 'var(--primary-blue)' }}>Valor Previsto (R$)</th>
                                         </tr>
                                     </thead>
@@ -1360,7 +1360,7 @@ const Dashboard = () => {
                                             <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 700 }}>{formatCurrencyValue(currentMonthInsight.scenarios.conservador.value)}</td>
                                         </tr>
                                         <tr style={{ borderBottom: '1px solid rgba(0,0,0,0.05)', background: 'rgba(0, 229, 255, 0.05)' }}>
-                                            <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--primary-blue)' }}>Prov\u00e1vel</td>
+                                            <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--primary-blue)' }}>Provável</td>
                                             <td style={{ padding: '12px 8px', color: 'var(--text-dark)', fontSize: '0.78rem' }}>{currentMonthInsight.scenarios.provavel.description}</td>
                                             <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 800, color: 'var(--primary-blue)', fontSize: '1.05rem' }}>{formatCurrencyValue(currentMonthInsight.scenarios.provavel.value)}</td>
                                         </tr>
@@ -1374,7 +1374,7 @@ const Dashboard = () => {
                             </div>
                             
                             <div style={{ marginTop: '15px', padding: '12px', borderRadius: '12px', background: 'white', borderLeft: '4px solid var(--secondary-cyan)', fontSize: '0.78rem', color: 'var(--text-light)', fontStyle: 'italic' }}>
-                                A an\u00e1lise considera sazonalidade (Holt-Winters), Run Rate em tempo real e elasticidade de categorias para garantir integridade estat\u00edstica sem alucina\u00e7\u00f5es.
+                                A análise considera sazonalidade (Holt-Winters), Run Rate em tempo real e elasticidade de categorias para garantir integridade estatística sem alucinações.
                             </div>
                         </div>
 
@@ -1495,9 +1495,9 @@ const Dashboard = () => {
                         border: '1px solid rgba(26, 35, 126, 0.08)'
                     }}
                 >
-                    <h5 style={{ margin: '0 0 8px', fontSize: '0.95rem' }}>Sem base no m\u00eas corrente</h5>
+                    <h5 style={{ margin: '0 0 8px', fontSize: '0.95rem' }}>Sem base no mês corrente</h5>
                     <p style={{ margin: 0, color: 'var(--text-light)', fontSize: '0.86rem', lineHeight: 1.55 }}>
-                        Ainda n\u00e3o h\u00e1 despesas registradas em {currentMonthInsight.monthLabel}. Assim que houver lan\u00e7amentos manuais ou cupons importados neste m\u00eas, a proje\u00e7\u00e3o de fechamento, o perfil do consumidor e a s\u00edntese estrat\u00e9gica ser\u00e3o preenchidos automaticamente.
+                        Ainda não há despesas registradas em {currentMonthInsight.monthLabel}. Assim que houver lançamentos manuais ou cupons importados neste mês, a projeção de fechamento, o perfil do consumidor e a síntese estratégica serão preenchidos automaticamente.
                     </p>
                 </div>
             )}
