@@ -12,7 +12,6 @@ import Dashboard from './components/Dashboard';
 import HistoryView from './components/HistoryView';
 import SettingsView from './components/SettingsView';
 import ManualEntryView from './components/ManualEntryView';
-import SpendingTree from './components/SpendingTree';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 
@@ -32,8 +31,6 @@ function App() {
         return <Scanner onComplete={() => setActiveTab('history')} />;
       case 'settings':
         return <SettingsView onNavigate={setActiveTab} />;
-      case 'spendingTree':
-        return <SpendingTree onBack={() => setActiveTab('settings')} />;
       case 'manual':
         return <ManualEntryView
           onComplete={() => setActiveTab('history')}
@@ -110,8 +107,7 @@ function App() {
       )}
 
       {/* Navigation Bar */}
-      {activeTab !== 'spendingTree' && (
-        <nav className="nav-bar">
+      <nav className="nav-bar">
         <button
           className={`nav-item ${activeTab === 'home' ? 'active' : ''}`}
           onClick={() => setActiveTab('home')}
@@ -145,7 +141,6 @@ function App() {
           <span>Escanear</span>
         </button>
         </nav>
-      )}
     </div>
   );
 }

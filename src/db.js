@@ -47,8 +47,7 @@ db.version(5).stores({
   products: '++id, receiptId, name, brand, category, unitPrice, quantity, totalValue, paymentMethod',
   categories: '++id, name, color',
   productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
-  productKnowledge: '++id, &name, category',
-  budgets: '&monthKey, amount'
+  productKnowledge: '++id, &name, category'
 });
 
 // Seed initial categories

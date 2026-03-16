@@ -434,13 +434,10 @@ const Settings = ({ onNavigate }) => {
 
             <div 
                 className="glass-card" 
-                onClick={() => onNavigate?.('spendingTree')}
                 style={{ 
                     background: 'var(--primary-blue)', 
                     color: 'white', 
-                    marginTop: '20px',
-                    cursor: 'pointer',
-                    transition: 'transform 0.2s ease'
+                    marginTop: '20px'
                 }}
             >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>

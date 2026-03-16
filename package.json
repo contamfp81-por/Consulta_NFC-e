@@ -22,7 +22,6 @@
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.0",
     "lucide-react": "^0.577.0",
-    "pixi.js": "^8.17.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "recharts": "^3.7.0",
