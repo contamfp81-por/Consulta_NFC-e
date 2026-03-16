@@ -2032,27 +2032,26 @@ export const generateConsumptionAnalysisPdf = async ({
         addSummaryCard(pdf, label, value, x, y, cardWidth);
     });
 
+    const synthesisText = `${insights.summary.highlights.join(' ')} A projeção temporal aponta ${reportData.temporalProjection.direction} do gasto agregado, enquanto a composição por categorias ajuda a antecipar prioridades orçamentárias de curto prazo.`;
+    const synthesisLines = pdf.splitTextToSize(synthesisText, 487);
+    const synthesisHeight = Math.max(112, synthesisLines.length * 14 + 56);
+    
     pdf.setFillColor(COLORS.page);
-    pdf.roundedRect(40, 370, 515, 112, 14, 14, 'F');
+    pdf.roundedRect(40, 370, 515, synthesisHeight, 14, 14, 'F');
     pdf.setTextColor(COLORS.text);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(13);
     pdf.text('Síntese estratégica', 56, 396);
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
-    pdf.text(
-        pdf.splitTextToSize(
-            `${insights.summary.highlights.join(' ')} A projeção temporal aponta ${reportData.temporalProjection.direction} do gasto agregado, enquanto a composição por categorias ajuda a antecipar prioridades orçamentárias de curto prazo.`,
-            487
-        ),
-        56,
-        418
-    );
+    pdf.text(synthesisLines, 56, 418);
 
-    addNarrativeCard(pdf, 'Concentração do gasto', insights.summary.concentrationNote, 40, 508, 251, 110, COLORS.blue);
-    addNarrativeCard(pdf, 'Recorrência diária', insights.summary.recurrenceNote, 304, 508, 251, 110, COLORS.cyan);
-    addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, 632, 515, 96, COLORS.slate);
+    const narrativeY = 370 + synthesisHeight + 26;
+    addNarrativeCard(pdf, 'Concentração do gasto', insights.summary.concentrationNote, 40, narrativeY, 251, 110, COLORS.blue);
+    addNarrativeCard(pdf, 'Recorrência diária', insights.summary.recurrenceNote, 304, narrativeY, 251, 110, COLORS.cyan);
+    addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, narrativeY + 124, 515, 96, COLORS.slate);
 
+    pdf.addPage();
     addProjectionAnalysisPage(pdf, insights.summary.title, reportData, insights);
 
     const chartPages = [
