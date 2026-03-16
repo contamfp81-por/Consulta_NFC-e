@@ -831,6 +831,11 @@ const Dashboard = () => {
             paceDescription = `Os ultimos ${recentWindow.length} dias recuaram ${formatSharePercent(Math.abs(paceChange))} versus a janela anterior.`;
         }
 
+        const activeDays = dailyTotals.filter((item) => item.value > 0).length;
+        const activeDayAverage = monthTotalSpent / Math.max(1, activeDays);
+        const projectedTotal = averageDailySpend * totalDaysInMonth;
+        const projectedAdditionalSpend = Math.max(0, projectedTotal - monthTotalSpent);
+
         let accumulatedActual = 0;
         const projectionChartData = Array.from({ length: totalDaysInMonth }, (_, index) => {
             const dayNumber = index + 1;
@@ -866,11 +871,6 @@ const Dashboard = () => {
                 picos: dayNumber >= currentDay ? (dayNumber === currentDay ? accumulatedActual : projectedPicos) : null
             };
         });
-
-        const activeDays = dailyTotals.filter((item) => item.value > 0).length;
-        const activeDayAverage = monthTotalSpent / Math.max(1, activeDays);
-        const projectedTotal = averageDailySpend * totalDaysInMonth;
-        const projectedAdditionalSpend = Math.max(0, projectedTotal - monthTotalSpent);
 
         const categoryMap = {};
         monthProducts.forEach((product) => {
