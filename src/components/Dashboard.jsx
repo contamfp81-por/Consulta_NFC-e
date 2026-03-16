@@ -844,21 +844,19 @@ const Dashboard = () => {
             // Calculations for different scenarios
             const remainingDaysFromDay = Math.max(0, totalDaysInMonth - dayNumber);
             
-            // Linear projection (Provável)
-            const projectedProvavel = averageDailySpend * dayNumber;
-            
-            // Conservador: Smooth average and reduced impulses
-            const conservadorDaily = Math.min(recentAverage, averageDailySpend) * 0.92;
-            const projectedConservador = dayNumber <= currentDay 
-                ? (accumulatedActual / dayNumber) * dayNumber // Just to follow a line
-                : accumulatedActual + (conservadorDaily * (dayNumber - currentDay));
+            // target values for the end of the month (matching the scenarios object below)
+            const targetProvavel = projectedTotal * (1 + (paceChange * 0.08));
+            const targetConservador = monthTotalSpent + (Math.min(recentAverage, averageDailySpend) * 0.92 * (totalDaysInMonth - currentDay));
+            const targetPicos = Math.max(projectedTotal * 1.15, monthTotalSpent + (Math.max(...dailyTotals.map(d => d.value), averageDailySpend) * (totalDaysInMonth - currentDay)));
 
-            // Picos: Maximum historical occurrences
-            const maxHistoricalDaily = Math.max(...dailyTotals.map(d => d.value), averageDailySpend);
-            const picosDaily = Math.max(averageDailySpend * 1.15, maxHistoricalDaily);
-            const projectedPicos = dayNumber <= currentDay
-                ? (accumulatedActual / dayNumber) * dayNumber
-                : accumulatedActual + (picosDaily * (dayNumber - currentDay));
+            // Daily increment for remaining part of the month
+            const dailyIncProv = (targetProvavel - accumulatedActual) / Math.max(1, totalDaysInMonth - currentDay);
+            const dailyIncCons = (targetConservador - accumulatedActual) / Math.max(1, totalDaysInMonth - currentDay);
+            const dailyIncPicos = (targetPicos - accumulatedActual) / Math.max(1, totalDaysInMonth - currentDay);
+
+            const projectedProvavel = dayNumber <= currentDay ? accumulatedActual : accumulatedActual + (dailyIncProv * (dayNumber - currentDay));
+            const projectedConservador = dayNumber <= currentDay ? accumulatedActual : accumulatedActual + (dailyIncCons * (dayNumber - currentDay));
+            const projectedPicos = dayNumber <= currentDay ? accumulatedActual : accumulatedActual + (dailyIncPicos * (dayNumber - currentDay));
 
             return {
                 day: String(dayNumber).padStart(2, '0'),
@@ -999,7 +997,7 @@ const Dashboard = () => {
                     description: 'Baseado na média móvel suavizada e redução de gastos impulsivos.'
                 },
                 provavel: {
-                    value: projectedTotal * (1 + (paceChange * 0.08)), // Slight adjustment based on trend
+                    value: projectedTotal * (1 + (paceChange * 0.08)),
                     description: 'Ponto de equilíbrio entre Holt-Winters e o Run Rate atual (92% de confiança).'
                 },
                 picos: {
@@ -1269,7 +1267,7 @@ const Dashboard = () => {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart
                                         data={currentMonthInsight.projectionChartData}
-                                        margin={{ top: 25, right: 20, left: 10, bottom: 10 }}
+                                        margin={{ top: 40, right: 20, left: 10, bottom: 10 }}
                                     >
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
                                         <XAxis 

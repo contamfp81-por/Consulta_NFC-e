@@ -1025,7 +1025,7 @@ const drawMultiScenarioProjectionChart = ({
     }
 
     drawFrame(context, canvas.width, canvas.height, title, subtitle);
-    const area = { left: 90, top: 120, width: canvas.width - 250, height: canvas.height - 200 };
+    const area = { left: 90, top: 180, width: canvas.width - 150, height: canvas.height - 250 };
     
     const allValues = data.flatMap((item) => [
         item.actual,
@@ -1084,9 +1084,10 @@ const drawMultiScenarioProjectionChart = ({
         }
     });
 
-    // Legend
-    const legendX = canvas.width - 230;
-    let legendY = 120;
+    // Legend at Top
+    const legendY = 135;
+    let currentLegendX = area.left;
+    const spacing = 220;
     
     const addLegendItem = (label, color, isDashed = false) => {
         context.save();
@@ -1094,16 +1095,16 @@ const drawMultiScenarioProjectionChart = ({
         context.strokeStyle = color;
         context.lineWidth = 3;
         context.beginPath();
-        context.moveTo(legendX, legendY + 5);
-        context.lineTo(legendX + 25, legendY + 5);
+        context.moveTo(currentLegendX, legendY);
+        context.lineTo(currentLegendX + 25, legendY);
         context.stroke();
         context.restore();
         
         context.fillStyle = COLORS.text;
         context.font = '700 16px Arial';
         context.textAlign = 'left';
-        context.fillText(label, legendX + 35, legendY + 12);
-        legendY += 35;
+        context.fillText(label, currentLegendX + 35, legendY + 6);
+        currentLegendX += spacing;
     };
 
     addLegendItem('Gasto Real', COLORS.navy);
