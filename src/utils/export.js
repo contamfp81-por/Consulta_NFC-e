@@ -1025,7 +1025,7 @@ const drawMultiScenarioProjectionChart = ({
     }
 
     drawFrame(context, canvas.width, canvas.height, title, subtitle);
-    const area = { left: 90, top: 180, width: canvas.width - 150, height: canvas.height - 250 };
+    const area = { left: 90, top: 120, width: canvas.width - 150, height: canvas.height - 220 };
     
     const allValues = data.flatMap((item) => [
         item.actual,
@@ -1084,8 +1084,8 @@ const drawMultiScenarioProjectionChart = ({
         }
     });
 
-    // Legend at Top
-    const legendY = 135;
+    // Legend at Bottom
+    const legendY = canvas.height - 35;
     let currentLegendX = area.left;
     const spacing = 220;
     

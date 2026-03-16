@@ -1267,7 +1267,7 @@ const Dashboard = () => {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart
                                         data={currentMonthInsight.projectionChartData}
-                                        margin={{ top: 40, right: 20, left: 10, bottom: 10 }}
+                                        margin={{ top: 15, right: 20, left: 10, bottom: 40 }}
                                     >
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
                                         <XAxis 
@@ -1291,10 +1291,10 @@ const Dashboard = () => {
                                             labelFormatter={(label) => `Dia ${label}`}
                                         />
                                         <Legend 
-                                            verticalAlign="top" 
-                                            height={45} 
+                                            verticalAlign="bottom" 
+                                            height={36} 
                                             iconType="circle" 
-                                            wrapperStyle={{ paddingTop: '10px', paddingBottom: '20px' }}
+                                            wrapperStyle={{ paddingTop: '20px' }}
                                         />
                                         
                                         {/* Scenario: Picos */}
