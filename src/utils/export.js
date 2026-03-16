@@ -1010,7 +1010,109 @@ const drawLineAreaChart = ({
     return canvas;
 };
 
-// drawProjectionChart removed as requested to prioritize technical scenarios table
+const drawMultiScenarioProjectionChart = ({
+    title,
+    subtitle,
+    data,
+    totalDays,
+    width = 1400,
+    height = 500
+}) => {
+    const { canvas, context } = createCanvas(width, height);
+    if (!data || !data.length) {
+        drawEmptyState(context, canvas.width, canvas.height, title, subtitle, 'Sem dados de proje\u00e7\u00e3o');
+        return canvas;
+    }
+
+    drawFrame(context, canvas.width, canvas.height, title, subtitle);
+    const area = { left: 90, top: 100, width: canvas.width - 150, height: canvas.height - 180 };
+    
+    const allValues = data.flatMap((item) => [
+        item.actual,
+        item.provavel,
+        item.conservador,
+        item.picos
+    ]).filter(v => v !== null && !isNaN(v));
+    
+    const maxValue = Math.max(...allValues, 100) * 1.1;
+    const minValue = 0;
+    const range = maxValue - minValue;
+
+    drawGridLines(context, area, minValue, maxValue, formatCurrency);
+
+    const getX = (index) => area.left + (area.width / Math.max(1, data.length - 1)) * index;
+    const getY = (val) => area.top + area.height - ((Number(val) - minValue) / range) * area.height;
+
+    // Helper to draw a line
+    const drawLine = (key, color, isDashed = false, lineWidth = 3) => {
+        const points = data
+            .map((item, index) => item[key] !== null ? { x: getX(index), y: getY(item[key]) } : null)
+            .filter(p => p !== null);
+
+        if (points.length < 2) return;
+
+        context.save();
+        if (isDashed) context.setLineDash([12, 8]);
+        context.beginPath();
+        points.forEach((point, index) => {
+            if (index === 0) context.moveTo(point.x, point.y);
+            else context.lineTo(point.x, point.y);
+        });
+        context.strokeStyle = color;
+        context.lineWidth = lineWidth;
+        context.stroke();
+        context.restore();
+    };
+
+    // Draw scenarios
+    drawLine('picos', '#D84315', true, 3);
+    drawLine('provavel', COLORS.blue, true, 4);
+    drawLine('conservador', '#2E7D32', true, 3);
+    
+    // Draw Actual (Solid)
+    drawLine('actual', COLORS.navy, false, 6);
+
+    // Labels
+    data.forEach((item, index) => {
+        const x = getX(index);
+        const labelFrequency = Math.max(1, Math.ceil(data.length / 10));
+        if (index === 0 || index === data.length - 1 || index % labelFrequency === 0) {
+            context.fillStyle = COLORS.muted;
+            context.font = '400 13px Arial';
+            context.textAlign = 'center';
+            context.fillText(String(item.day), x, canvas.height - 40);
+        }
+    });
+
+    // Legend
+    const legendX = canvas.width - 200;
+    let legendY = 35;
+    
+    const addLegendItem = (label, color, isDashed = false) => {
+        context.save();
+        if (isDashed) context.setLineDash([6, 4]);
+        context.strokeStyle = color;
+        context.lineWidth = 3;
+        context.beginPath();
+        context.moveTo(legendX, legendY + 5);
+        context.lineTo(legendX + 25, legendY + 5);
+        context.stroke();
+        context.restore();
+        
+        context.fillStyle = COLORS.text;
+        context.font = '700 14px Arial';
+        context.textAlign = 'left';
+        context.fillText(label, legendX + 35, legendY + 10);
+        legendY += 25;
+    };
+
+    addLegendItem('Gasto Real', COLORS.navy);
+    addLegendItem('Prov\u00e1vel', COLORS.blue, true);
+    addLegendItem('Conservador', '#2E7D32', true);
+    addLegendItem('Picos', '#D84315', true);
+
+    return canvas;
+};
 
 const buildVisibleSegments = (data, maxSegments, remainderLabel) => {
     if (!data.length) return [];
@@ -1829,12 +1931,11 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(COLORS.text);
-    const introText = 'RELAT\u00d3RIO DE RISCO E PREVIS\u00c3O (PADR\u00c3O BANC\u00c1RIO)\nAnalise hibrida de series temporais (Holt-Winters) e Run Rate para previsao com meta de 92% de precisao.';
-    pdf.text(pdf.splitTextToSize(introText, 515), 40, 122);
+    pdf.text('RELAT\u00d3RIO DE RISCO E PREVIS\u00c3O (PADR\u00c3O BANC\u00c1RIO)\nAn\u00e1lise h\u00edbrida de s\u00e9ries temporais (Holt-Winters) e Run Rate para previs\u00e3o com meta de 92% de precis\u00e3o.', 40, 122);
     
     const columns = [
-        { label: 'Cenario', width: 100 },
-        { label: 'Descricao da Logica', width: 315 },
+        { label: 'Cen\u00e1rio', width: 100 },
+        { label: 'Descri\u00e7\u00e3o da L\u00f3gica', width: 315 },
         { label: 'Valor Previsto', width: 100 }
     ];
     
@@ -1842,7 +1943,7 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     if (scenarios) {
         const rows = [
             { name: 'Conservador', logic: scenarios.conservador.description, value: formatCurrency(scenarios.conservador.value) },
-            { name: 'Provavel', logic: scenarios.provavel.description, value: formatCurrency(scenarios.provavel.value), isBold: true },
+            { name: 'Prov\u00e1vel', logic: scenarios.provavel.description, value: formatCurrency(scenarios.provavel.value), isBold: true },
             { name: 'Se repetir picos', logic: scenarios.picos.description, value: formatCurrency(scenarios.picos.value) }
         ];
         
@@ -1856,19 +1957,28 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
         pdf.setFont('helvetica', 'italic');
         pdf.setFontSize(9);
         pdf.setTextColor(COLORS.muted);
-        pdf.text('A analise considera sazonalidade, Run Rate e elasticidade de categorias.', 40, currentY + 20);
+        pdf.text('A an\u00e1lise considera sazonalidade, Run Rate e elasticidade de categorias.', 40, currentY + 20);
     } else {
-        pdf.text('Dados de projecao insuficientes para o mes atual.', 40, 180);
+        pdf.text('Dados de proje\u00e7\u00e3o insuficientes para o m\u00eas atual.', 40, 180);
     }
 
-    addInsightBlock(pdf, 'Leitura de Risco', insights.projection.comportamento, 40, 350, 515, COLORS.blue);
-    addInsightBlock(pdf, 'Tendencia e Ajustes', insights.projection.tendencia, 40, 490, 515, COLORS.cyan);
+    const chartCanvas = drawMultiScenarioProjectionChart({
+        title: 'Curva de Tend\u00eancia e Riscos',
+        subtitle: 'Proje\u00e7\u00e3o de fechamento sob diferentes cen\u00e1rios de consumo',
+        data: reportData.monthInsight?.projectionChartData || [],
+        totalDays: reportData.monthInsight?.totalDaysInMonth || 30
+    });
+    
+    pdf.addImage(chartCanvas.toDataURL('image/png', 1), 'PNG', 40, 260, 515, 180, undefined, 'FAST');
+
+    addInsightBlock(pdf, 'Leitura de Risco', insights.projection.comportamento, 40, 460, 515, COLORS.blue);
+    addInsightBlock(pdf, 'Tend\u00eancia e Ajustes', insights.projection.tendencia, 40, 570, 515, COLORS.cyan);
     
     addNarrativeCard(
         pdf, 
-        'Conclusao da Analise', 
+        'Conclus\u00e3o da An\u00e1lise', 
         insights.projection.tendencia + ' ' + (reportData.monthInsight?.outlookSentence || ''), 
-        40, 630, 515, 100, COLORS.navy
+        40, 680, 515, 80, COLORS.navy
     );
 };
 

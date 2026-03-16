@@ -841,10 +841,31 @@ const Dashboard = () => {
                 accumulatedActual += dayValue;
             }
 
+            // Calculations for different scenarios
+            const remainingDaysFromDay = Math.max(0, totalDaysInMonth - dayNumber);
+            
+            // Linear projection (Provável)
+            const projectedProvavel = averageDailySpend * dayNumber;
+            
+            // Conservador: Smooth average and reduced impulses
+            const conservadorDaily = Math.min(recentAverage, averageDailySpend) * 0.92;
+            const projectedConservador = dayNumber <= currentDay 
+                ? (accumulatedActual / dayNumber) * dayNumber // Just to follow a line
+                : accumulatedActual + (conservadorDaily * (dayNumber - currentDay));
+
+            // Picos: Maximum historical occurrences
+            const maxHistoricalDaily = Math.max(...dailyTotals.map(d => d.value), averageDailySpend);
+            const picosDaily = Math.max(averageDailySpend * 1.15, maxHistoricalDaily);
+            const projectedPicos = dayNumber <= currentDay
+                ? (accumulatedActual / dayNumber) * dayNumber
+                : accumulatedActual + (picosDaily * (dayNumber - currentDay));
+
             return {
                 day: String(dayNumber).padStart(2, '0'),
                 actual: dayNumber <= currentDay ? accumulatedActual : null,
-                projected: averageDailySpend * dayNumber
+                provavel: dayNumber >= currentDay ? (dayNumber === currentDay ? accumulatedActual : projectedProvavel) : null,
+                conservador: dayNumber >= currentDay ? (dayNumber === currentDay ? accumulatedActual : projectedConservador) : null,
+                picos: dayNumber >= currentDay ? (dayNumber === currentDay ? accumulatedActual : projectedPicos) : null
             };
         });
 
@@ -928,18 +949,18 @@ const Dashboard = () => {
             dominantPaymentShare: dominantPaymentMethod?.share || 0
         });
 
-        const outlookSentence = `Ate ${formatMonthDayLabel(currentDateKey)}, o mes de ${monthLabel} acumula ${formatCurrencyValue(monthTotalSpent)}. Mantido o ritmo medio de ${formatCurrencyValue(averageDailySpend)} por dia corrido, o fechamento estimado e de ${formatCurrencyValue(projectedTotal)}, com mais ${formatCurrencyValue(projectedAdditionalSpend)} ate o ultimo dia.`;
+        const outlookSentence = `At\u00e9 ${formatMonthDayLabel(currentDateKey)}, o m\u00eas de ${monthLabel} acumula ${formatCurrencyValue(monthTotalSpent)}. Mantido o ritmo m\u00e9dio de ${formatCurrencyValue(averageDailySpend)} por dia corrido, o fechamento estimado \u00e9 de ${formatCurrencyValue(projectedTotal)}, com mais ${formatCurrencyValue(projectedAdditionalSpend)} at\u00e9 o \u00faltimo dia.`;
         const concentrationSentence = topCategory && topStore
-            ? `${topCategory.name} lidera com ${formatSharePercent(topCategory.share)} do mes, enquanto ${topStore.name} concentra ${formatSharePercent(topStore.share)} do valor movimentado.`
-            : 'A distribuicao atual ainda esta pouco concentrada entre categorias e estabelecimentos.';
+            ? `${topCategory.name} lidera com ${formatSharePercent(topCategory.share)} do m\u00eas, enquanto ${topStore.name} concentra ${formatSharePercent(topStore.share)} do valor movimentado.`
+            : 'A distribui\u00e7\u00e3o atual ainda est\u00e1 pouco concentrada entre categorias e estabelecimentos.';
         const paymentSentence = dominantPaymentMethod
             ? `${dominantPaymentMethod.name} aparece como principal alavanca de pagamento com ${formatSharePercent(dominantPaymentMethod.share)} do total.`
-            : 'Ainda nao ha uma forma de pagamento dominante no mes.';
+            : 'Ainda n\u00e3o h\u00e1 uma forma de pagamento dominante no m\u00eas.';
         const actionSentence = paceChange > 0.12
-            ? 'Como a curva recente acelerou, o melhor ponto de controle esta nas categorias lideres e nos gastos de reposicao recorrente, para evitar um fechamento acima da percepcao atual.'
+            ? 'Como a curva recente acelerou, o melhor ponto de controle est\u00e1 nas categorias l\u00edderes e nos gastos de reposi\u00e7\u00e3o recorrente, para evitar um fechamento acima da percep\u00e7\u00e3o atual.'
             : essentialShare >= 0.62
-                ? 'Como a maior parte do gasto esta em categorias essenciais, a estrategia mais eficaz e revisar frequencia de compra, marcas e reposicoes para preservar margem sem cortar itens-chave.'
-                : 'Com um padrao mais distribuido, o maior ganho de previsibilidade vem de acompanhar estabelecimentos e meios de pagamento com maior peso financeiro.';
+                ? 'Como a maior parte do gasto est\u00e1 em categorias essenciais, a estrat\u00e9gia mais eficaz \u00e9 revisar frequ\u00eancia de compra, marcas e reposi\u00e7\u00f5es para preservar margem sem cortar itens-chave.'
+                : 'Com um padr\u00e3o mais distribu\u00eddo, o maior ganho de previsibilidade vem de acompanhar estabelecimentos e meios de pagamento com maior peso financeiro.';
 
         return {
             hasData: true,
@@ -975,15 +996,15 @@ const Dashboard = () => {
             scenarios: {
                 conservador: {
                     value: monthTotalSpent + (Math.min(recentAverage, averageDailySpend) * 0.92 * remainingDays),
-                    description: 'Baseado na media movel suavizada e reducao de gastos impulsivos.'
+                    description: 'Baseado na m\u00e9dia m\u00f3vel suavizada e redu\u00e7\u00e3o de gastos impulsivos.'
                 },
                 provavel: {
                     value: projectedTotal * (1 + (paceChange * 0.08)), // Slight adjustment based on trend
-                    description: 'Ponto de equilibrio entre Holt-Winters e o Run Rate atual (92% de confianca).'
+                    description: 'Ponto de equil\u00edbrio entre Holt-Winters e o Run Rate atual (92% de confian\u00e7a).'
                 },
                 picos: {
                     value: Math.max(projectedTotal * 1.15, monthTotalSpent + (Math.max(...dailyTotals.map(d => d.value), averageDailySpend) * remainingDays)),
-                    description: 'Considera a reocorrencia de gastos maximos sazonais detectados no historico.'
+                    description: 'Considera a reocorr\u00eancia de gastos m\u00e1ximos sazonais detectados no hist\u00f3rico.'
                 }
             }
         };
@@ -1175,7 +1196,7 @@ const Dashboard = () => {
                     <div>
                         <h4 style={{ margin: 0, fontSize: '0.98rem' }}>Proje\u00e7\u00e3o de Fechamento do M\u00eas</h4>
                         <p style={{ margin: '4px 0 0', color: 'var(--text-light)', fontSize: '0.82rem', lineHeight: 1.45 }}>
-                            Cruza lancamentos manuais e cupons importados do mes atual para estimar o fechamento, identificar o perfil do consumidor e consolidar uma sintese estrategica.
+                            Cruza lan\u00e7amentos manuais e cupons importados do m\u00eas atual para estimar o fechamento, identificar o perfil do consumidor e consolidar uma s\u00edntese estrat\u00e9gica.
                         </p>
                     </div>
                 </div>
@@ -1185,7 +1206,7 @@ const Dashboard = () => {
                 <>
                     <div style={{ ...RESPONSIVE_SUMMARY_GRID, marginBottom: '20px' }}>
                         <div style={{ padding: '16px', borderRadius: '16px', background: 'rgba(26, 35, 126, 0.06)' }}>
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-light)', marginBottom: '6px' }}>Acumulado no mes</div>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-light)', marginBottom: '6px' }}>Acumulado no m\u00eas</div>
                             <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--primary-blue)' }}>
                                 {formatCurrencyValue(currentMonthInsight.monthTotalSpent)}
                             </div>
@@ -1200,7 +1221,7 @@ const Dashboard = () => {
                                 {formatCurrencyValue(currentMonthInsight.projectedTotal)}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                Projecao linear ate o fim do mes no ritmo atual.
+                                Proje\u00e7\u00e3o estat\u00edstica at\u00e9 o fim do m\u00eas.
                             </div>
                         </div>
 
@@ -1210,7 +1231,7 @@ const Dashboard = () => {
                                 {formatCurrencyValue(currentMonthInsight.projectedAdditionalSpend)}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                Estimativa para os proximos {currentMonthInsight.remainingDays} dias.
+                                Estimativa para os pr\u00f3ximos {currentMonthInsight.remainingDays} dias.
                             </div>
                         </div>
 
@@ -1243,6 +1264,86 @@ const Dashboard = () => {
                                 </p>
                             </div>
 
+                            {/* Multi-Scenario Projection Chart */}
+                            <div style={{ height: '320px', width: '100%', marginBottom: '25px', padding: '10px', background: 'white', borderRadius: '15px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart
+                                        data={currentMonthInsight.projectionChartData}
+                                        margin={{ top: 15, right: 10, left: 10, bottom: 10 }}
+                                    >
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
+                                        <XAxis 
+                                            dataKey="day" 
+                                            axisLine={false} 
+                                            tickLine={false} 
+                                            fontSize={10} 
+                                            tick={{ fill: 'var(--text-light)' }}
+                                            interval={Math.max(0, Math.ceil(currentMonthInsight.totalDaysInMonth / 10) - 1)}
+                                        />
+                                        <YAxis 
+                                            axisLine={false} 
+                                            tickLine={false} 
+                                            fontSize={10} 
+                                            tick={{ fill: 'var(--text-light)' }}
+                                            tickFormatter={(value) => `R$ ${value >= 1000 ? (value/1000).toFixed(1) + 'k' : value}`}
+                                        />
+                                        <Tooltip 
+                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 16px rgba(0,0,0,0.1)', fontSize: '0.86rem' }}
+                                            formatter={(value) => formatCurrencyValue(value)}
+                                            labelFormatter={(label) => `Dia ${label}`}
+                                        />
+                                        <Legend verticalAlign="top" height={36} iconType="circle" />
+                                        
+                                        {/* Scenario: Picos */}
+                                        <Line 
+                                            name="Se repetir picos" 
+                                            type="monotone" 
+                                            dataKey="picos" 
+                                            stroke="#D84315" 
+                                            strokeWidth={2} 
+                                            strokeDasharray="5 5"
+                                            dot={false} 
+                                            activeDot={{ r: 4 }}
+                                        />
+                                        
+                                        {/* Scenario: Provável */}
+                                        <Line 
+                                            name="Prov\u00e1vel" 
+                                            type="monotone" 
+                                            dataKey="provavel" 
+                                            stroke="var(--primary-blue)" 
+                                            strokeWidth={3} 
+                                            strokeDasharray="5 5"
+                                            dot={false} 
+                                            activeDot={{ r: 6 }}
+                                        />
+                                        
+                                        {/* Scenario: Conservador */}
+                                        <Line 
+                                            name="Conservador" 
+                                            type="monotone" 
+                                            dataKey="conservador" 
+                                            stroke="#2E7D32" 
+                                            strokeWidth={2} 
+                                            strokeDasharray="5 5"
+                                            dot={false} 
+                                            activeDot={{ r: 4 }}
+                                        />
+
+                                        {/* Real Spending */}
+                                        <Line 
+                                            name="Gasto Real" 
+                                            type="monotone" 
+                                            dataKey="actual" 
+                                            stroke="var(--primary-blue)" 
+                                            strokeWidth={5} 
+                                            dot={{ r: 3, fill: 'var(--primary-blue)', strokeWidth: 0 }} 
+                                            activeDot={{ r: 8 }}
+                                        />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </div>
+
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                                     <thead>
@@ -1259,7 +1360,7 @@ const Dashboard = () => {
                                             <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 700 }}>{formatCurrencyValue(currentMonthInsight.scenarios.conservador.value)}</td>
                                         </tr>
                                         <tr style={{ borderBottom: '1px solid rgba(0,0,0,0.05)', background: 'rgba(0, 229, 255, 0.05)' }}>
-                                            <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--primary-blue)' }}>Provavel</td>
+                                            <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--primary-blue)' }}>Prov\u00e1vel</td>
                                             <td style={{ padding: '12px 8px', color: 'var(--text-dark)', fontSize: '0.78rem' }}>{currentMonthInsight.scenarios.provavel.description}</td>
                                             <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 800, color: 'var(--primary-blue)', fontSize: '1.05rem' }}>{formatCurrencyValue(currentMonthInsight.scenarios.provavel.value)}</td>
                                         </tr>
@@ -1394,9 +1495,9 @@ const Dashboard = () => {
                         border: '1px solid rgba(26, 35, 126, 0.08)'
                     }}
                 >
-                    <h5 style={{ margin: '0 0 8px', fontSize: '0.95rem' }}>Sem base no mes corrente</h5>
+                    <h5 style={{ margin: '0 0 8px', fontSize: '0.95rem' }}>Sem base no m\u00eas corrente</h5>
                     <p style={{ margin: 0, color: 'var(--text-light)', fontSize: '0.86rem', lineHeight: 1.55 }}>
-                        Ainda nao ha despesas registradas em {currentMonthInsight.monthLabel}. Assim que houver lancamentos manuais ou cupons importados neste mes, a projecao de fechamento, o perfil do consumidor e a sintese estrategica serao preenchidos automaticamente.
+                        Ainda n\u00e3o h\u00e1 despesas registradas em {currentMonthInsight.monthLabel}. Assim que houver lan\u00e7amentos manuais ou cupons importados neste m\u00eas, a proje\u00e7\u00e3o de fechamento, o perfil do consumidor e a s\u00edntese estrat\u00e9gica ser\u00e3o preenchidos automaticamente.
                     </p>
                 </div>
             )}
