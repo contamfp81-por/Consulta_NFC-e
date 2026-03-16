@@ -1257,7 +1257,7 @@ const Dashboard = () => {
                         >
                             <div style={{ marginBottom: '20px' }}>
                                 <h5 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--primary-blue)', fontWeight: 800 }}>
-                                    Algoritmo de Previsão de Gastos de Alta Precisão (Padrão Bancário)
+                                    Algoritmo de Previsão de Gastos
                                 </h5>
                                 <p style={{ margin: '10px 0', color: 'var(--text-dark)', fontSize: '0.86rem', lineHeight: 1.6, fontWeight: 500 }}>
                                     Análise híbrida de séries temporais (Holt-Winters), Média Móvel Estabilizadora e Run Rate para previsão com meta de 92% de precisão, seguindo metodologias de análise de risco das maiores instituições financeiras globais.
@@ -1265,11 +1265,11 @@ const Dashboard = () => {
                             </div>
 
                             {/* Multi-Scenario Projection Chart */}
-                            <div style={{ height: '320px', width: '100%', marginBottom: '25px', padding: '10px', background: 'white', borderRadius: '15px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                            <div style={{ height: '400px', width: '100%', marginBottom: '25px', padding: '10px', background: 'white', borderRadius: '15px', border: '1px solid rgba(0,0,0,0.05)' }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart
                                         data={currentMonthInsight.projectionChartData}
-                                        margin={{ top: 15, right: 10, left: 10, bottom: 10 }}
+                                        margin={{ top: 25, right: 20, left: 10, bottom: 10 }}
                                     >
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
                                         <XAxis 
@@ -1292,7 +1292,12 @@ const Dashboard = () => {
                                             formatter={(value) => formatCurrencyValue(value)}
                                             labelFormatter={(label) => `Dia ${label}`}
                                         />
-                                        <Legend verticalAlign="top" height={36} iconType="circle" />
+                                        <Legend 
+                                            verticalAlign="top" 
+                                            height={45} 
+                                            iconType="circle" 
+                                            wrapperStyle={{ paddingTop: '10px', paddingBottom: '20px' }}
+                                        />
                                         
                                         {/* Scenario: Picos */}
                                         <Line 

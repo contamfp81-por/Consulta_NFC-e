@@ -1025,7 +1025,7 @@ const drawMultiScenarioProjectionChart = ({
     }
 
     drawFrame(context, canvas.width, canvas.height, title, subtitle);
-    const area = { left: 90, top: 100, width: canvas.width - 150, height: canvas.height - 180 };
+    const area = { left: 90, top: 120, width: canvas.width - 250, height: canvas.height - 200 };
     
     const allValues = data.flatMap((item) => [
         item.actual,
@@ -1085,8 +1085,8 @@ const drawMultiScenarioProjectionChart = ({
     });
 
     // Legend
-    const legendX = canvas.width - 200;
-    let legendY = 35;
+    const legendX = canvas.width - 230;
+    let legendY = 120;
     
     const addLegendItem = (label, color, isDashed = false) => {
         context.save();
@@ -1100,10 +1100,10 @@ const drawMultiScenarioProjectionChart = ({
         context.restore();
         
         context.fillStyle = COLORS.text;
-        context.font = '700 14px Arial';
+        context.font = '700 16px Arial';
         context.textAlign = 'left';
-        context.fillText(label, legendX + 35, legendY + 10);
-        legendY += 25;
+        context.fillText(label, legendX + 35, legendY + 12);
+        legendY += 35;
     };
 
     addLegendItem('Gasto Real', COLORS.navy);
@@ -1926,12 +1926,12 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     pdf.setTextColor(COLORS.text);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(18);
-    pdf.text('Algoritmo de Previsão de Alta Precisão', 40, 102);
+    pdf.text('Algoritmo de Previsão de Gastos', 40, 102);
     
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(COLORS.text);
-    pdf.text('RELATÓRIO DE RISCO E PREVISÃO (PADRÃO BANCÁRIO)\nAnálise híbrida de séries temporais (Holt-Winters) e Run Rate para previsão com meta de 92% de precisão.', 40, 122);
+    pdf.text('RELATÓRIO DE RISCO E PREVISÃO\nAnálise de tendências sob cenários estatísticos.', 40, 122);
     
     const columns = [
         { label: 'Cenário', width: 100 },
