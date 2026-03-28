@@ -844,10 +844,10 @@ const buildTrendComparison = (currentSummary, previousSummary, label) => {
 
     if (variationPercent <= -5) {
         direction = 'worse';
-        message = `Sua alimentacao piorou ${Math.abs(variationPercent).toFixed(0)}% em ${label.toLowerCase()}`;
+        message = `Sua alimentacao piorou ${Math.abs(variationPercent).toFixed(0)}% ${label.toLowerCase().startsWith('semana') ? 'na' : 'no'} ${label.toLowerCase()}`;
     } else if (variationPercent >= 5) {
         direction = 'better';
-        message = `Sua alimentacao melhorou ${Math.abs(variationPercent).toFixed(0)}% em ${label.toLowerCase()}`;
+        message = `Sua alimentacao melhorou ${Math.abs(variationPercent).toFixed(0)}% ${label.toLowerCase().startsWith('semana') ? 'na' : 'no'} ${label.toLowerCase()}`;
     }
 
     return {
