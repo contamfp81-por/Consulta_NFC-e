@@ -1,5 +1,6 @@
 import jsPdfRuntimeUrl from '../vendor/jspdf.umd.min.js?url';
 import * as XLSX from 'xlsx';
+import { normalizePaymentMethod, PAYMENT_METHOD_NOT_INFORMED } from './paymentMethods';
 
 let jsPdfLoaderPromise = null;
 const JSPDF_RUNTIME_SRC = jsPdfRuntimeUrl;
@@ -129,6 +130,11 @@ const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', cu
 const percentFormatter = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const axisDateFormatter = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
+const monthBucketFormatter = new Intl.DateTimeFormat('pt-BR', {
+    month: 'short',
+    year: '2-digit',
+    timeZone: 'UTC'
+});
 
 const sum = (values) => values.reduce((total, value) => total + value, 0);
 const average = (values) => (values.length ? sum(values) / values.length : 0);
@@ -157,6 +163,34 @@ const formatAxisDate = (value) => {
     return date ? axisDateFormatter.format(date) : String(value ?? '');
 };
 
+const getDateKey = (value) => {
+    const date = safeDate(value);
+    return date ? date.toISOString().split('T')[0] : null;
+};
+
+const getMonthKey = (value) => {
+    const dateKey = getDateKey(value);
+    return dateKey ? dateKey.slice(0, 7) : null;
+};
+
+const formatMonthBucketLabel = (monthKey) => {
+    if (!monthKey) return 'Sem referencia';
+
+    const [year, month] = String(monthKey).split('-').map(Number);
+    const date = new Date(Date.UTC(year, (month || 1) - 1, 1));
+    if (Number.isNaN(date.getTime())) {
+        return monthKey;
+    }
+
+    return monthBucketFormatter.format(date).replace('.', '').replace(/\s+/g, '/');
+};
+
+const formatSignedCurrency = (value) => {
+    const numericValue = Number(value) || 0;
+    const sign = numericValue > 0 ? '+' : numericValue < 0 ? '-' : '';
+    return `${sign}${formatCurrency(Math.abs(numericValue))}`;
+};
+
 const describeDirection = (value, {
     up = 'alta',
     down = 'queda',
@@ -167,13 +201,6 @@ const describeDirection = (value, {
     if (numericValue > threshold) return up;
     if (numericValue < -threshold) return down;
     return stable;
-};
-
-const joinLabels = (labels, limit = 3) => {
-    const normalizedLabels = (labels || []).filter(Boolean);
-    if (!normalizedLabels.length) return '';
-    if (normalizedLabels.length <= limit) return normalizedLabels.join(', ');
-    return `${normalizedLabels.slice(0, limit).join(', ')} e mais ${normalizedLabels.length - limit}`;
 };
 
 const truncateText = (context, text, maxWidth) => {
@@ -346,6 +373,159 @@ const buildPriceHistogram = (products) => {
     return buckets.filter((bucket) => bucket.count > 0);
 };
 
+const resolvePriceBucketOrder = (bucketName) => {
+    const label = String(bucketName || '');
+    if (label.includes(formatCurrency(5))) return 0;
+    if (label.includes(formatCurrency(10))) return 1;
+    if (label.includes(formatCurrency(20))) return 2;
+    if (label.includes(formatCurrency(50))) return 3;
+    if (label.includes(formatCurrency(100))) return 4;
+    if (label.includes(formatCurrency(500)) && label.startsWith('Até')) return 5;
+    return 6;
+};
+
+const buildStoreData = (receipts) => {
+    const storeMap = {};
+
+    receipts.forEach((receipt) => {
+        const name = receipt.establishment || 'Outros';
+        storeMap[name] = (storeMap[name] || 0) + (Number(receipt.totalValue) || 0);
+    });
+
+    return Object.entries(storeMap)
+        .map(([name, value]) => ({
+            name,
+            shortName: name,
+            value
+        }))
+        .sort((left, right) => right.value - left.value);
+};
+
+const buildStoreTimelineData = (receipts, topStores) => {
+    const activeStoreKeys = new Set((topStores || []).map((store) => store.key));
+    const timelineMap = {};
+
+    receipts.forEach((receipt) => {
+        const monthKey = getMonthKey(receipt.date);
+        if (!monthKey) return;
+
+        if (!timelineMap[monthKey]) {
+            timelineMap[monthKey] = {
+                monthKey,
+                month: formatMonthBucketLabel(monthKey)
+            };
+        }
+
+        const storeKey = receipt.establishment || 'Outros';
+        if (!activeStoreKeys.has(storeKey)) {
+            return;
+        }
+
+        timelineMap[monthKey][storeKey] = (timelineMap[monthKey][storeKey] || 0) + (Number(receipt.totalValue) || 0);
+    });
+
+    return Object.values(timelineMap)
+        .sort((left, right) => String(left.monthKey).localeCompare(String(right.monthKey)));
+};
+
+const buildParetoData = (products, totalValueBase) => {
+    const productValueMap = {};
+
+    products.forEach((product) => {
+        const name = product.name || 'Produto';
+        productValueMap[name] = (productValueMap[name] || 0) + (Number(product.totalValue) || 0);
+    });
+
+    const sortedProducts = Object.entries(productValueMap)
+        .map(([name, value]) => ({
+            name,
+            shortName: name.length > 24 ? `${name.slice(0, 21).trimEnd()}...` : name,
+            value
+        }))
+        .sort((left, right) => right.value - left.value)
+        .slice(0, 10);
+
+    let runningValue = 0;
+    return sortedProducts.map((item) => {
+        runningValue += item.value;
+        return {
+            ...item,
+            percentage: safeRatio(runningValue, totalValueBase) * 100
+        };
+    });
+};
+
+const buildPaymentMethodBreakdown = (receipts, products, categoryTotalsMap = new Map()) => {
+    const receiptPaymentMethodMap = new Map(
+        receipts.map((receipt) => [
+            receipt.id,
+            normalizePaymentMethod(receipt.paymentMethod || PAYMENT_METHOD_NOT_INFORMED)
+        ])
+    );
+    const categoryPaymentMethodMap = {};
+    const paymentMethodSummaryMap = {};
+
+    products.forEach((product) => {
+        const category = product.category || 'Outros';
+        const paymentMethod = normalizePaymentMethod(
+            product.paymentMethod
+            || receiptPaymentMethodMap.get(product.receiptId)
+            || PAYMENT_METHOD_NOT_INFORMED
+        );
+        const totalValue = Number(product.totalValue) || 0;
+
+        if (totalValue <= 0) {
+            return;
+        }
+
+        const detailKey = `${category}|||${paymentMethod}`;
+        if (!categoryPaymentMethodMap[detailKey]) {
+            categoryPaymentMethodMap[detailKey] = {
+                category,
+                paymentMethod,
+                value: 0,
+                receiptIds: new Set()
+            };
+        }
+
+        categoryPaymentMethodMap[detailKey].value += totalValue;
+        categoryPaymentMethodMap[detailKey].receiptIds.add(product.receiptId);
+
+        if (!paymentMethodSummaryMap[paymentMethod]) {
+            paymentMethodSummaryMap[paymentMethod] = {
+                name: paymentMethod,
+                value: 0,
+                categories: new Set()
+            };
+        }
+
+        paymentMethodSummaryMap[paymentMethod].value += totalValue;
+        paymentMethodSummaryMap[paymentMethod].categories.add(category);
+    });
+
+    return {
+        paymentMethodSummaryData: Object.values(paymentMethodSummaryMap)
+            .map((item) => ({
+                name: item.name,
+                value: item.value,
+                categoryCount: item.categories.size
+            }))
+            .sort((left, right) => right.value - left.value),
+        categoryPaymentMethodData: Object.values(categoryPaymentMethodMap)
+            .map((item) => ({
+                category: item.category,
+                paymentMethod: item.paymentMethod,
+                value: item.value,
+                receiptCount: item.receiptIds.size,
+                categoryShare: safeRatio(item.value, categoryTotalsMap.get(item.category) || 0)
+            }))
+            .sort((left, right) => (
+                left.category.localeCompare(right.category, 'pt-BR')
+                || right.value - left.value
+            ))
+    };
+};
+
 const buildReceiptTicketHistogram = (receipts) => {
     const ranges = [
         { min: 0, max: 20, label: `${formatCurrency(0)} a ${formatCurrency(20)}` },
@@ -413,7 +593,13 @@ const buildAccumulatedData = (temporalData) => {
 };
 
 const buildReportData = ({ receipts, products, stats, selectedProductGroups }) => {
-    const totalSpent = Number(stats?.totalSpent) || sum(products.map((product) => Number(product.totalValue) || 0));
+    const receiptTotalSpent = Number(stats?.totalSpent)
+        || sum(receipts.map((receipt) => Number(receipt.totalValue) || 0))
+        || sum(products.map((product) => Number(product.totalValue) || 0));
+    const productTotalSpent = sum(products.map((product) => Number(product.totalValue) || 0))
+        || sum((stats?.categorySpendData || []).map((item) => Number(item.value) || 0))
+        || receiptTotalSpent;
+    const totalSpent = receiptTotalSpent;
     const temporalData = Array.isArray(stats?.dailyEvolutionData) && stats.dailyEvolutionData.length
         ? stats.dailyEvolutionData
             .map((item) => ({
@@ -428,10 +614,11 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
             .map((item) => ({
                 name: item.name || 'Outros',
                 value: Number(item.value) || 0,
-                percentage: Number(item.percentage) || safeRatio(Number(item.value) || 0, totalSpent) * 100
+                percentage: safeRatio(Number(item.value) || 0, productTotalSpent) * 100
             }))
             .sort((left, right) => right.value - left.value)
-        : buildCategoryComposition(products, totalSpent);
+        : buildCategoryComposition(products, productTotalSpent);
+    const categoryTotalsMap = new Map(categoryComposition.map((item) => [item.name, item.value]));
 
     const storeData = Array.isArray(stats?.storeData) && stats.storeData.length
         ? stats.storeData
@@ -441,21 +628,14 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
                 value: Number(item.value) || 0
             }))
             .sort((left, right) => right.value - left.value)
-        : [];
+        : buildStoreData(receipts);
 
-    const topStores = Array.isArray(stats?.top5Stores) && stats.top5Stores.length
-        ? stats.top5Stores.map((store) => ({
-            key: store.key,
-            label: store.label || store.key
-        }))
-        : storeData.slice(0, 5).map((store) => ({
-            key: store.name,
-            label: store.shortName
-        }));
+    const topStores = storeData.slice(0, 5).map((store) => ({
+        key: store.name,
+        label: store.shortName
+    }));
 
-    const stackedData = Array.isArray(stats?.stackedData)
-        ? stats.stackedData.map((item) => ({ ...item }))
-        : [];
+    const stackedData = buildStoreTimelineData(receipts, topStores);
 
     const accumulatedData = Array.isArray(stats?.accumulatedData) && stats.accumulatedData.length
         ? stats.accumulatedData
@@ -466,29 +646,18 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
             .sort((left, right) => left.date.localeCompare(right.date))
         : buildAccumulatedData(temporalData);
 
-    const paretoData = Array.isArray(stats?.paretoData)
-        ? stats.paretoData
-            .map((item) => ({
-                name: item.name || 'Item',
-                value: Number(item.value) || 0,
-                percentage: Number(item.percentage) || 0
-            }))
-            .sort((left, right) => right.value - left.value)
-        : [];
+    const paretoData = buildParetoData(products, productTotalSpent);
 
-    const treemapData = Array.isArray(stats?.treemapData?.[0]?.children) && stats.treemapData[0].children.length
-        ? stats.treemapData[0].children
-            .map((item) => ({
-                name: item.name || 'Outros',
-                size: Number(item.size) || 0
-            }))
-            .sort((left, right) => right.size - left.size)
-        : categoryComposition.map((item) => ({
-            name: item.name,
-            size: item.value
-        }));
+    const treemapData = categoryComposition.map((item) => ({
+        name: item.name,
+        size: item.value
+    }));
 
-    const receiptDateMap = new Map(receipts.map(r => [r.id, r.date?.split('T')[0]]));
+    const receiptDateMap = new Map(
+        receipts
+            .map((receipt) => [receipt.id, getDateKey(receipt.date)])
+            .filter(([, dateKey]) => Boolean(dateKey))
+    );
 
     let productEvolutionData = [];
     if (Array.isArray(stats?.productEvolutionData) && stats.productEvolutionData.length > 0) {
@@ -500,7 +669,6 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
         // Fallback: Calculate evolution for all products with multiple purchases
         const multiplePurchaseGroups = (stats?.productInflationData || []).map(p => p.id);
         if (multiplePurchaseGroups.length > 0) {
-            const mgSet = new Set(multiplePurchaseGroups);
             const evolutionMap = {};
             
             products.forEach(p => {
@@ -541,15 +709,15 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
         }
     }
 
-    const priceHistogramData = Array.isArray(stats?.histogramData) && stats.histogramData.length
-        ? stats.histogramData
-            .map((item) => ({
-                name: item.name || 'Faixa',
-                count: Number(item.count) || 0
-            }))
-        : buildPriceHistogram(products);
+    const priceHistogramData = buildPriceHistogram(products)
+        .map((item) => ({
+            ...item,
+            bucketOrder: resolvePriceBucketOrder(item.name)
+        }))
+        .sort((left, right) => left.bucketOrder - right.bucketOrder);
 
-    const paymentMethodSummaryData = Array.isArray(stats?.paymentMethodSummaryData)
+    const paymentFallback = buildPaymentMethodBreakdown(receipts, products, categoryTotalsMap);
+    const paymentMethodSummaryData = Array.isArray(stats?.paymentMethodSummaryData) && stats.paymentMethodSummaryData.length
         ? stats.paymentMethodSummaryData
             .map((item) => ({
                 name: item.name || 'Não informado',
@@ -557,18 +725,22 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
                 categoryCount: Number(item.categoryCount) || 0
             }))
             .sort((left, right) => right.value - left.value)
-        : [];
+        : paymentFallback.paymentMethodSummaryData;
 
-    const categoryPaymentMethodData = Array.isArray(stats?.categoryPaymentMethodData)
+    const categoryPaymentMethodData = Array.isArray(stats?.categoryPaymentMethodData) && stats.categoryPaymentMethodData.length
         ? stats.categoryPaymentMethodData
             .map((item) => ({
                 category: item.category || 'Outros',
                 paymentMethod: item.paymentMethod || 'Não informado',
                 value: Number(item.value) || 0,
                 receiptCount: Number(item.receiptCount) || 0,
-                categoryShare: Number(item.categoryShare) || 0
+                categoryShare: safeRatio(Number(item.value) || 0, categoryTotalsMap.get(item.category || 'Outros') || 0)
             }))
-        : [];
+            .sort((left, right) => (
+                left.category.localeCompare(right.category, 'pt-BR')
+                || right.value - left.value
+            ))
+        : paymentFallback.categoryPaymentMethodData;
 
     const topRecurringProducts = Array.isArray(stats?.topRecurringProducts)
         ? stats.topRecurringProducts
@@ -643,6 +815,9 @@ const buildReportData = ({ receipts, products, stats, selectedProductGroups }) =
         receipts,
         products,
         totalSpent,
+        receiptTotalSpent,
+        productTotalSpent,
+        receiptItemGap: receiptTotalSpent - productTotalSpent,
         temporalData,
         categoryComposition,
         storeData,
@@ -683,10 +858,10 @@ const buildInsights = (reportData) => {
 
     const topStore = reportData.storeData[0];
     const secondStore = reportData.storeData[1];
-    const topStoreShare = safeRatio(topStore?.value || 0, reportData.totalSpent) * 100;
+    const topStoreShare = safeRatio(topStore?.value || 0, reportData.receiptTotalSpent) * 100;
     const topThreeStoreShare = safeRatio(
         sum(reportData.storeData.slice(0, 3).map((item) => item.value)),
-        reportData.totalSpent
+        reportData.receiptTotalSpent
     ) * 100;
 
     const monthlyTotals = reportData.stackedData.map((item) => ({
@@ -706,7 +881,11 @@ const buildInsights = (reportData) => {
     const dominantPriceBucket = [...reportData.priceHistogramData].sort((left, right) => right.count - left.count)[0];
     const totalPriceItems = sum(reportData.priceHistogramData.map((item) => item.count));
     const lowPriceShare = safeRatio(
-        sum(reportData.priceHistogramData.slice(0, 2).map((item) => item.count)),
+        sum(
+            reportData.priceHistogramData
+                .filter((item) => Number(item.bucketOrder) <= 1)
+                .map((item) => item.count)
+        ),
         totalPriceItems
     ) * 100;
 
@@ -732,6 +911,11 @@ const buildInsights = (reportData) => {
         .sort((left, right) => right.financialImpact - left.financialImpact || right.inflationRate - left.inflationRate)[0];
     const inflationTopCategory = [...reportData.inflation.categoryInflationData]
         .sort((left, right) => right.financialImpact - left.financialImpact || right.inflationRate - left.inflationRate)[0];
+    const topPaymentMethod = reportData.paymentMethodSummaryData[0];
+    const topPaymentMethodShare = safeRatio(topPaymentMethod?.value || 0, reportData.productTotalSpent) * 100;
+    const leadingPaymentCategory = [...reportData.categoryPaymentMethodData]
+        .sort((left, right) => right.value - left.value)[0];
+    const hasReceiptItemGap = Math.abs(reportData.receiptItemGap) > 0.01;
 
     return {
         summary: {
@@ -742,15 +926,18 @@ const buildInsights = (reportData) => {
                 : 'Período completo',
             highlights: [
                 topCategory
-                    ? `A categoria ${topCategory.name} é o seu maior gargalo financeiro, representando ${formatPercent(topCategory.percentage)} do valor total.`
+                    ? `A categoria ${topCategory.name} é o seu maior gargalo financeiro, representando ${formatPercent(topCategory.percentage)} do valor dos itens analisados.`
                     : 'Ainda não há maturidade de dados para destacar uma categoria líder.',
                 topStore
-                    ? `O estabelecimento ${topStore.name} detém ${formatPercent(topStoreShare)} da sua preferência de compra.`
+                    ? `O estabelecimento ${topStore.name} detém ${formatPercent(topStoreShare)} do valor total dos cupons analisados.`
                     : 'A distribuição entre estabelecimentos está equilibrada ou insuficiente.',
                 reportData.inflation.comparableProductsCount > 0
                     ? `A sua inflação pessoal atingiu ${formatSignedRatioPercent(reportData.inflation.personalInflationRate)}, gerando um custo extra de ${formatCurrency(reportData.inflation.totalInflationImpact)}.`
                     : 'A base comparativa de preços ainda está em formação.'
             ],
+            dataIntegrityNote: hasReceiptItemGap
+                ? `Os cupons somam ${formatCurrency(reportData.receiptTotalSpent)} e os itens detalhados somam ${formatCurrency(reportData.productTotalSpent)}, com diferença de ${formatSignedCurrency(reportData.receiptItemGap)}. Essa variação normalmente reflete descontos, arredondamentos ou ajustes fiscais do cupom.`
+                : `Os totais de cupons (${formatCurrency(reportData.receiptTotalSpent)}) e itens (${formatCurrency(reportData.productTotalSpent)}) estão alinhados, sem distorção material na base analisada.`,
             concentrationNote: topThreeStoreShare > 0
                 ? `As 3 maiores lojas concentram ${formatPercent(topThreeStoreShare)} do seu orçamento. ${topThreeStoreShare >= 65 ? 'Isso indica uma dependência crítica: qualquer variação de preços nestes locais impactará fortemente seu saldo.' : 'Sua carteira está bem distribuída, o que reduz o risco de monopólio de preços.'}`
                 : 'Processando fluxo de concentração...',
@@ -764,7 +951,7 @@ const buildInsights = (reportData) => {
         projection: {
             finalidade: 'Projetar o fechamento do gasto mensal com base no ritmo médio atual versus o histórico acumulado.',
             comportamento: reportData.monthInsight?.hasData
-                ? `O fechamento estimado para o mês de ${reportData.monthInsight.monthLabel} é de ${formatCurrency(reportData.monthInsight.projectedTotal)}. Atualmente, você já desembolsou ${formatCurrency(reportData.monthInsight.monthTotalSpent)}, o que representa ${formatPercent((reportData.monthInsight.monthTotalSpent / reportData.monthInsight.projectedTotal) * 100)} do total esperado.`
+                ? `O fechamento estimado para o mês de ${reportData.monthInsight.monthLabel} é de ${formatCurrency(reportData.monthInsight.projectedTotal)}. Atualmente, você já desembolsou ${formatCurrency(reportData.monthInsight.monthTotalSpent)}, o que representa ${formatPercent(safeRatio(reportData.monthInsight.monthTotalSpent, reportData.monthInsight.projectedTotal) * 100)} do total esperado.`
                 : 'A projeção requer dados do mês vigente para traçar o cenário de fechamento.',
             tendencia: reportData.monthInsight?.hasData
                 ? `O ritmo do dia a dia está em ${formatCurrency(reportData.monthInsight.averageDailySpend)}. ${reportData.monthInsight.paceLabel === 'Acelerando' ? 'Atenção: A aceleração recente sugere que o gasto final pode superar a média histórica se não houver ajuste de rota.' : 'A estabilidade ou queda no ritmo indica um fechamento dentro das margens planejadas.'}`
@@ -782,7 +969,7 @@ const buildInsights = (reportData) => {
         temporal: {
             finalidade: 'Analisar o ritmo de desembolso diário para identificar sazonalidade e dias de maior sensibilidade financeira.',
             comportamento: peakTemporal
-                ? `Seus gastos não são lineares: o dia ${formatDate(peakTemporal.date)} concentrou um volume atípico de ${formatCurrency(peakTemporal.value)}. A média diária do período ficou em ${formatCurrency(reportData.totalSpent / Math.max(1, reportData.temporalData.length))}.`
+                ? `Seus gastos não são lineares: o dia ${formatDate(peakTemporal.date)} concentrou um volume atípico de ${formatCurrency(peakTemporal.value)}. A média diária do período ficou em ${formatCurrency(reportData.receiptTotalSpent / Math.max(1, reportData.temporalData.length))}.`
                 : 'Os dados temporais ainda estão dispersos para uma conclusão sólida.',
             tendencia: `A projeção sugere um gasto de ${formatCurrency(reportData.temporalProjection.projectedNext30)} para o próximo mês. O sinal é de ${reportData.temporalProjection.direction}, indicando que você deve ${reportData.temporalProjection.direction === 'alta' ? 'reforçar o controle' : 'manter a disciplina'} para evitar surpresas.`
         },
@@ -850,6 +1037,15 @@ const buildInsights = (reportData) => {
                 ? `A maioria dos seus itens (${dominantPriceBucket.count} unidades) custa ${dominantPriceBucket.name}. Isso mostra que seu volume de compras é focado em itens de ${lowPriceShare > 60 ? 'baixo valor unitário' : 'valor intermediário'}.`
                 : 'Perfilando faixas de preço...',
             tendencia: `Com ${formatPercent(lowPriceShare)} dos itens em faixas baixas, você realiza um consumo de "varejo formiguinha". Itens na faixa acima de R$ 100,00, embora menos frequentes, devem ter sua necessidade revisada.`
+        },
+        paymentMethods: {
+            finalidade: 'Cruzar categorias e meios de pagamento para entender como o gasto é liquidado e onde existe maior concentração financeira.',
+            comportamento: topPaymentMethod
+                ? `${topPaymentMethod.name} movimentou ${formatCurrency(topPaymentMethod.value)} e apareceu em ${topPaymentMethod.categoryCount} categorias. ${leadingPaymentCategory ? `A combinação mais relevante foi ${leadingPaymentCategory.category} com ${leadingPaymentCategory.paymentMethod}, somando ${formatCurrency(leadingPaymentCategory.value)}.` : ''}`
+                : 'Ainda não há meios de pagamento suficientes para leitura analítica.',
+            tendencia: topPaymentMethod
+                ? `Quando ${formatPercent(topPaymentMethodShare)} do valor dos itens fica concentrado em um único meio de pagamento, custos financeiros e limite de crédito passam a influenciar o consumo. Avalie se há espaço para redistribuir gastos de ${topPaymentMethod.name}.`
+                : 'A tendência por forma de pagamento será destravada conforme novos cupons com meio identificado forem importados.'
         },
         composition: {
             finalidade: 'Visualizar a estrutura do seu orçamento de forma circular para entender o equilíbrio entre as categorias.',
@@ -1014,7 +1210,6 @@ const drawMultiScenarioProjectionChart = ({
     title,
     subtitle,
     data,
-    totalDays,
     width = 1400,
     height = 500
 }) => {
@@ -1430,7 +1625,7 @@ const drawParetoChart = (paretoData) => {
         context.fillStyle = COLORS.muted;
         context.font = '400 13px Arial';
         context.textAlign = 'right';
-        context.fillText(item.name, 0, 0);
+        context.fillText(item.shortName || item.name, 0, 0);
         context.restore();
     });
 
@@ -1502,7 +1697,7 @@ const drawTreemapChart = (treemapData, totalSpent) => {
             canvas.width,
             canvas.height,
             'Treemap de Categorias',
-            'Peso relativo das categorias no gasto total',
+            'Peso relativo das categorias no valor dos itens analisados',
             'Sem dados suficientes'
         );
         return canvas;
@@ -1513,7 +1708,7 @@ const drawTreemapChart = (treemapData, totalSpent) => {
         canvas.width,
         canvas.height,
         'Treemap de Categorias',
-        'Peso relativo das categorias no gasto total'
+        'Peso relativo das categorias no valor dos itens analisados'
     );
 
     const sortedItems = [...treemapData]
@@ -1552,7 +1747,7 @@ const drawCompositionChart = (categoryComposition) => drawDonutChart({
     data: categoryComposition,
     valueFormatter: formatCurrency,
     centerValue: '100%',
-    centerLabel: 'do gasto analisado',
+    centerLabel: 'dos itens analisados',
     maxSegments: 6,
     remainderLabel: 'Demais categorias'
 });
@@ -1710,6 +1905,45 @@ const addSummaryCard = (pdf, label, value, x, y, width) => {
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(14);
     pdf.text(pdf.splitTextToSize(String(value), width - 28), x + 14, y + 44);
+};
+
+const addMetricCard = (pdf, label, value, x, y, width, accentColor = COLORS.blue) => {
+    pdf.setFillColor(COLORS.page);
+    pdf.roundedRect(x, y, width, 58, 10, 10, 'F');
+    pdf.setFillColor(accentColor);
+    pdf.roundedRect(x, y, 6, 58, 6, 6, 'F');
+    pdf.setTextColor(COLORS.muted);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.text(label, x + 16, y + 18);
+    pdf.setTextColor(COLORS.text);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(11);
+    pdf.text(pdf.splitTextToSize(String(value), width - 28), x + 16, y + 38);
+};
+
+const addMetricStrip = (pdf, metrics, x, y, width) => {
+    const visibleMetrics = metrics.filter((metric) => metric && metric.label && metric.value !== undefined).slice(0, 3);
+    if (!visibleMetrics.length) {
+        return y;
+    }
+
+    const gap = 12;
+    const cardWidth = (width - gap * (visibleMetrics.length - 1)) / visibleMetrics.length;
+
+    visibleMetrics.forEach((metric, index) => {
+        addMetricCard(
+            pdf,
+            metric.label,
+            metric.value,
+            x + index * (cardWidth + gap),
+            y,
+            cardWidth,
+            metric.color || CHART_COLORS[index % CHART_COLORS.length]
+        );
+    });
+
+    return y + 72;
 };
 
 const addInsightBlock = (pdf, title, body, x, y, width, accentColor) => {
@@ -1913,12 +2147,20 @@ const addInflationOverviewPage = (pdf, reportTitle, reportData, insights) => {
     addNarrativeCard(pdf, 'Tendência observada', insights.inflation.tendencia, 40, 570, 515, 92, COLORS.blue);
 };
 
-const addChartPage = (pdf, reportTitle, pageTitle, canvas, insights) => {
+const addAnalyticalChartPage = (pdf, reportTitle, pageTitle, canvas, insights, metrics = []) => {
     addPageHeader(pdf, reportTitle, pageTitle);
-    pdf.addImage(canvas.toDataURL('image/png', 1), 'PNG', 40, 92, 515, 220, undefined, 'FAST');
-    addInsightBlock(pdf, 'Finalidade do gráfico', insights.finalidade, 40, 335, 515, COLORS.blue);
-    addInsightBlock(pdf, 'Análise de comportamento', insights.comportamento, 40, 475, 515, COLORS.cyan);
-    addInsightBlock(pdf, 'Tendência de consumo', insights.tendencia, 40, 615, 515, COLORS.slate);
+    pdf.setTextColor(COLORS.text);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(18);
+    pdf.text(pageTitle, 40, 102);
+    pdf.addImage(canvas.toDataURL('image/png', 1), 'PNG', 40, 122, 515, 180, undefined, 'FAST');
+
+    const metricsBottom = addMetricStrip(pdf, metrics, 40, 320, 515);
+    const narrativeStartY = metricsBottom ? metricsBottom + 4 : 320;
+
+    addNarrativeCard(pdf, 'Finalidade do gráfico', insights.finalidade, 40, narrativeStartY, 515, 98, COLORS.blue);
+    addNarrativeCard(pdf, 'Análise de comportamento', insights.comportamento, 40, narrativeStartY + 112, 515, 98, COLORS.cyan);
+    addNarrativeCard(pdf, 'Tendência de consumo', insights.tendencia, 40, narrativeStartY + 224, 515, 98, COLORS.slate);
 };
 
 const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
@@ -1983,10 +2225,64 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     );
 };
 
+const EXCEL_MAX_SHEET_NAME_LENGTH = 31;
+
+const sanitizeSheetName = (value, fallback = 'Relatorio') => {
+    const normalized = String(value || fallback)
+        .replace(/:|\\|\/|\?|\*|\[|\]/g, ' ')
+        .trim()
+        .slice(0, EXCEL_MAX_SHEET_NAME_LENGTH);
+
+    return normalized || fallback;
+};
+
+const buildWorksheetFromRows = (rows = [], columns = []) => {
+    const normalizedRows = Array.isArray(rows) ? rows : [];
+    const header = columns.length
+        ? columns
+        : Array.from(new Set(normalizedRows.flatMap((row) => Object.keys(row || {}))));
+
+    const worksheet = normalizedRows.length
+        ? XLSX.utils.json_to_sheet(normalizedRows, { header })
+        : XLSX.utils.aoa_to_sheet([header]);
+
+    if (header.length) {
+        worksheet['!cols'] = header.map((columnKey) => {
+            const maxContentLength = normalizedRows.reduce((maxLength, row) => {
+                const rawValue = row?.[columnKey];
+                const textValue = rawValue === null || rawValue === undefined ? '' : String(rawValue);
+                return Math.max(maxLength, textValue.length);
+            }, String(columnKey).length);
+
+            return { wch: Math.min(40, Math.max(12, maxContentLength + 2)) };
+        });
+
+        if (worksheet['!ref']) {
+            worksheet['!autofilter'] = { ref: worksheet['!ref'] };
+        }
+    }
+
+    return worksheet;
+};
+
 export const exportToExcel = (data, filename = 'gastos_contabeis.xlsx') => {
-    const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Relatorio');
+
+    if (data && Array.isArray(data.sheets) && data.sheets.length) {
+        data.sheets.forEach((sheet, index) => {
+            const worksheet = buildWorksheetFromRows(sheet.rows, sheet.columns);
+            XLSX.utils.book_append_sheet(
+                workbook,
+                worksheet,
+                sanitizeSheetName(sheet.name, `Relatorio${index + 1}`)
+            );
+        });
+    } else {
+        const rows = Array.isArray(data) ? data : [];
+        const worksheet = buildWorksheetFromRows(rows);
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Relatorio');
+    }
+
     XLSX.writeFile(workbook, filename);
 };
 
@@ -2007,7 +2303,7 @@ export const generateConsumptionAnalysisPdf = async ({
     const insights = buildInsights(reportData);
     const pdf = new JsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4', compress: true });
     const pageWidth = pdf.internal.pageSize.getWidth();
-    const avgTicket = reportData.receipts.length ? reportData.totalSpent / reportData.receipts.length : 0;
+    const avgTicket = reportData.receipts.length ? reportData.receiptTotalSpent / reportData.receipts.length : 0;
 
     addPageHeader(pdf, insights.summary.title, insights.summary.subtitle);
     pdf.setTextColor(COLORS.text);
@@ -2022,17 +2318,17 @@ export const generateConsumptionAnalysisPdf = async ({
 
     const cardWidth = (pageWidth - 100) / 2;
     [
-        ['Total analisado', formatCurrency(reportData.totalSpent)],
+        ['Total em cupons', formatCurrency(reportData.receiptTotalSpent)],
+        ['Total dos itens', formatCurrency(reportData.productTotalSpent)],
         ['Cupons processados', `${reportData.receipts.length}`],
-        ['Ticket médio', formatCurrency(avgTicket)],
-        ['Perfil inferido', reportData.profile]
+        ['Ticket médio', formatCurrency(avgTicket)]
     ].forEach(([label, value], index) => {
         const x = 40 + (index % 2) * (cardWidth + 20);
         const y = 172 + Math.floor(index / 2) * 92;
         addSummaryCard(pdf, label, value, x, y, cardWidth);
     });
 
-    const synthesisText = `${insights.summary.highlights.join(' ')} A projeção temporal aponta ${reportData.temporalProjection.direction} do gasto agregado, enquanto a composição por categorias ajuda a antecipar prioridades orçamentárias de curto prazo.`;
+    const synthesisText = `${insights.summary.highlights.join(' ')} Perfil inferido: ${reportData.profile}. ${insights.summary.dataIntegrityNote} A projeção temporal aponta ${reportData.temporalProjection.direction} do gasto agregado, enquanto a composição por categorias ajuda a antecipar prioridades orçamentárias de curto prazo.`;
     const synthesisLines = pdf.splitTextToSize(synthesisText, 487);
     const synthesisHeight = Math.max(112, synthesisLines.length * 14 + 56);
     
@@ -2054,6 +2350,55 @@ export const generateConsumptionAnalysisPdf = async ({
     pdf.addPage();
     addProjectionAnalysisPage(pdf, insights.summary.title, reportData, insights);
 
+    const topStore = reportData.storeData[0];
+    const secondStore = reportData.storeData[1];
+    const topStoreShare = safeRatio(topStore?.value || 0, reportData.receiptTotalSpent) * 100;
+    const topThreeStoreShare = safeRatio(
+        sum(reportData.storeData.slice(0, 3).map((item) => item.value)),
+        reportData.receiptTotalSpent
+    ) * 100;
+    const peakTemporal = [...reportData.temporalData].sort((left, right) => right.value - left.value)[0];
+    const monthlyTotals = reportData.stackedData.map((item) => ({
+        month: item.month || 'Sem referência',
+        total: sum(reportData.topStores.map((store) => Number(item[store.key]) || 0))
+    }));
+    const peakMonth = [...monthlyTotals].sort((left, right) => right.total - left.total)[0];
+    const averageMonthValue = average(monthlyTotals.map((item) => item.total));
+    const totalAccumulated = reportData.accumulatedData.at(-1)?.total || 0;
+    const accumulatedMidPoint = reportData.accumulatedData[Math.floor(reportData.accumulatedData.length / 2)]?.total || 0;
+    const topParetoItem = reportData.paretoData[0];
+    const paretoTopThreeShare = reportData.paretoData[2]?.percentage || reportData.paretoData.at(-1)?.percentage || 0;
+    const dominantPriceBucket = [...reportData.priceHistogramData].sort((left, right) => right.count - left.count)[0];
+    const lowPriceShare = safeRatio(
+        sum(
+            reportData.priceHistogramData
+                .filter((item) => Number(item.bucketOrder) <= 1)
+                .map((item) => item.count)
+        ),
+        sum(reportData.priceHistogramData.map((item) => item.count))
+    ) * 100;
+    const topPaymentMethod = reportData.paymentMethodSummaryData[0];
+    const topPaymentMethodShare = safeRatio(topPaymentMethod?.value || 0, reportData.productTotalSpent) * 100;
+    const leadingPaymentCategory = [...reportData.categoryPaymentMethodData]
+        .sort((left, right) => right.value - left.value)[0];
+    const topCategory = reportData.categoryComposition[0];
+    const topThreeCategoryShare = sum(reportData.categoryComposition.slice(0, 3).map((item) => item.percentage));
+    const topLink = [...reportData.flowData.links].sort((left, right) => right.value - left.value)[0];
+    const dominantDay = [...reportData.heatmapData].sort((left, right) => right.value - left.value)[0];
+    const weekendShare = safeRatio(
+        sum(
+            reportData.heatmapData
+                .filter((item) => item.name === 'Sáb' || item.name === 'Dom')
+                .map((item) => item.value)
+        ),
+        sum(reportData.heatmapData.map((item) => item.value))
+    ) * 100;
+    const dominantTicketBucket = [...reportData.receiptHistogramData].sort((left, right) => right.count - left.count)[0];
+    const lowTicketShare = safeRatio(
+        sum(reportData.receiptHistogramData.slice(0, 2).map((item) => item.count)),
+        sum(reportData.receiptHistogramData.map((item) => item.count))
+    ) * 100;
+
     const chartPages = [
         {
             title: 'Evolução dos Gastos ao Longo do Tempo',
@@ -2069,7 +2414,12 @@ export const generateConsumptionAnalysisPdf = async ({
                 xFormatter: formatAxisDate,
                 emptyMessage: 'Sem dados suficientes'
             }),
-            insights: insights.temporal
+            insights: insights.temporal,
+            metrics: [
+                { label: 'Maior dia', value: peakTemporal ? formatCurrency(peakTemporal.value) : 'Sem pico', color: COLORS.blue },
+                { label: 'Média diária', value: formatCurrency(reportData.receiptTotalSpent / Math.max(1, reportData.temporalData.length)), color: COLORS.cyan },
+                { label: 'Projeção 30 dias', value: formatCurrency(reportData.temporalProjection.projectedNext30), color: COLORS.slate }
+            ]
         },
         {
             title: 'Distribuição por Loja (%)',
@@ -2078,15 +2428,20 @@ export const generateConsumptionAnalysisPdf = async ({
                 subtitle: 'Participação financeira dos principais estabelecimentos',
                 data: reportData.storeData.map((item) => ({
                     ...item,
-                    percentage: safeRatio(item.value, reportData.totalSpent) * 100
+                    percentage: safeRatio(item.value, reportData.receiptTotalSpent) * 100
                 })),
                 valueFormatter: formatCurrency,
-                centerValue: formatCurrency(reportData.totalSpent),
-                centerLabel: 'gasto total',
+                centerValue: formatCurrency(reportData.receiptTotalSpent),
+                centerLabel: 'total em cupons',
                 maxSegments: 6,
                 remainderLabel: 'Demais lojas'
             }),
-            insights: insights.storeDistribution
+            insights: insights.storeDistribution,
+            metrics: [
+                { label: 'Loja líder', value: topStore?.name || 'Sem destaque', color: COLORS.blue },
+                { label: 'Participação líder', value: formatPercent(topStoreShare), color: COLORS.cyan },
+                { label: 'Top 3 lojas', value: formatPercent(topThreeStoreShare), color: COLORS.slate }
+            ]
         },
         {
             title: 'Comparativo de Lojas',
@@ -2101,7 +2456,12 @@ export const generateConsumptionAnalysisPdf = async ({
                 barColor: COLORS.blue,
                 maxBars: 5
             }),
-            insights: insights.storeComparison
+            insights: insights.storeComparison,
+            metrics: [
+                { label: '1º lugar', value: formatCurrency(topStore?.value || 0), color: COLORS.blue },
+                { label: '2º lugar', value: formatCurrency(secondStore?.value || 0), color: COLORS.cyan },
+                { label: 'Diferença', value: formatCurrency((topStore?.value || 0) - (secondStore?.value || 0)), color: COLORS.slate }
+            ]
         },
         {
             title: 'Gastos por Loja x Mês',
@@ -2111,7 +2471,12 @@ export const generateConsumptionAnalysisPdf = async ({
                 data: reportData.stackedData,
                 series: reportData.topStores
             }),
-            insights: insights.storeTimeline
+            insights: insights.storeTimeline,
+            metrics: [
+                { label: 'Mês de pico', value: peakMonth?.month || 'Sem série', color: COLORS.blue },
+                { label: 'Valor do pico', value: formatCurrency(peakMonth?.total || 0), color: COLORS.cyan },
+                { label: 'Média mensal', value: formatCurrency(averageMonthValue), color: COLORS.slate }
+            ]
         },
         {
             title: 'Volume Acumulado de Gastos',
@@ -2127,12 +2492,22 @@ export const generateConsumptionAnalysisPdf = async ({
                 xFormatter: formatAxisDate,
                 emptyMessage: 'Sem dados suficientes'
             }),
-            insights: insights.accumulated
+            insights: insights.accumulated,
+            metrics: [
+                { label: 'Acumulado final', value: formatCurrency(totalAccumulated), color: COLORS.blue },
+                { label: 'Ponto médio', value: formatCurrency(accumulatedMidPoint), color: COLORS.cyan },
+                { label: 'Direção', value: reportData.temporalProjection.direction, color: COLORS.slate }
+            ]
         },
         {
             title: 'Gráfico de Pareto (Top 10 Produtos)',
             canvas: drawParetoChart(reportData.paretoData),
-            insights: insights.pareto
+            insights: insights.pareto,
+            metrics: [
+                { label: 'Produto líder', value: topParetoItem?.name || 'Sem destaque', color: COLORS.blue },
+                { label: 'Top 3 acumulado', value: formatPercent(paretoTopThreeShare), color: COLORS.cyan },
+                { label: 'Top 10 somados', value: formatCurrency(sum(reportData.paretoData.map((item) => item.value))), color: COLORS.slate }
+            ]
         },
         {
             title: 'Top 5 Produtos Recorrentes',
@@ -2147,18 +2522,28 @@ export const generateConsumptionAnalysisPdf = async ({
                 barColor: COLORS.navy,
                 maxBars: 5
             }),
-            insights: insights.recurrentProducts
+            insights: insights.recurrentProducts,
+            metrics: [
+                { label: 'Produto líder', value: reportData.topRecurringProducts[0]?.name || 'Sem recorrência', color: COLORS.blue },
+                { label: 'Recorrências', value: `${reportData.topRecurringProducts[0]?.recurrenceCount || 0}`, color: COLORS.cyan },
+                { label: 'Impacto total', value: formatCurrency(reportData.topRecurringProducts[0]?.totalValue || 0), color: COLORS.slate }
+            ]
         },
         {
             title: 'Treemap de Categorias',
-            canvas: drawTreemapChart(reportData.treemapData, reportData.totalSpent),
-            insights: insights.treemap
+            canvas: drawTreemapChart(reportData.treemapData, reportData.productTotalSpent),
+            insights: insights.treemap,
+            metrics: [
+                { label: 'Categoria líder', value: topCategory?.name || 'Sem destaque', color: COLORS.blue },
+                { label: 'Valor líder', value: formatCurrency(topCategory?.value || 0), color: COLORS.cyan },
+                { label: 'Participação', value: formatPercent(topCategory?.percentage || 0), color: COLORS.slate }
+            ]
         },
         {
             title: 'Gastos por Categoria (%)',
             canvas: drawHorizontalBarChart({
                 title: 'Gastos por Categoria (%)',
-                subtitle: 'Participação percentual das categorias no gasto total',
+                subtitle: 'Participação percentual das categorias no valor dos itens',
                 data: reportData.categoryComposition,
                 labelKey: 'name',
                 valueKey: 'percentage',
@@ -2167,7 +2552,12 @@ export const generateConsumptionAnalysisPdf = async ({
                 barColor: COLORS.cyan,
                 maxBars: 10
             }),
-            insights: insights.categories
+            insights: insights.categories,
+            metrics: [
+                { label: 'Categoria líder', value: topCategory?.name || 'Sem destaque', color: COLORS.blue },
+                { label: 'Participação líder', value: formatPercent(topCategory?.percentage || 0), color: COLORS.cyan },
+                { label: 'Top 3 categorias', value: formatPercent(topThreeCategoryShare), color: COLORS.slate }
+            ]
         },
         {
             title: 'Histograma de Preços',
@@ -2181,17 +2571,52 @@ export const generateConsumptionAnalysisPdf = async ({
                 tickFormatter: (value) => `${Math.round(value)}`,
                 labelRotation: -Math.PI / 5
             }),
-            insights: insights.priceHistogram
+            insights: insights.priceHistogram,
+            metrics: [
+                { label: 'Faixa dominante', value: dominantPriceBucket?.name || 'Sem faixa', color: COLORS.blue },
+                { label: 'Itens na faixa', value: `${dominantPriceBucket?.count || 0}`, color: COLORS.cyan },
+                { label: 'Faixas baixas', value: formatPercent(lowPriceShare), color: COLORS.slate }
+            ]
+        },
+        {
+            title: 'Formas de Pagamento',
+            canvas: drawHorizontalBarChart({
+                title: 'Formas de Pagamento',
+                subtitle: 'Peso financeiro de cada meio sobre o valor dos itens analisados',
+                data: reportData.paymentMethodSummaryData,
+                labelKey: 'name',
+                valueKey: 'value',
+                valueFormatter: formatCurrency,
+                tickFormatter: formatCurrency,
+                barColor: COLORS.navy,
+                maxBars: 6
+            }),
+            insights: insights.paymentMethods,
+            metrics: [
+                { label: 'Meio líder', value: topPaymentMethod?.name || 'Sem registro', color: COLORS.blue },
+                { label: 'Participação', value: formatPercent(topPaymentMethodShare), color: COLORS.cyan },
+                { label: 'Maior cruzamento', value: leadingPaymentCategory ? `${leadingPaymentCategory.category} / ${leadingPaymentCategory.paymentMethod}` : 'Sem cruzamento', color: COLORS.slate }
+            ]
         },
         {
             title: 'Composição por Categorias',
             canvas: drawCompositionChart(reportData.categoryComposition),
-            insights: insights.composition
+            insights: insights.composition,
+            metrics: [
+                { label: 'Categoria líder', value: topCategory?.name || 'Sem destaque', color: COLORS.blue },
+                { label: 'Participação líder', value: formatPercent(topCategory?.percentage || 0), color: COLORS.cyan },
+                { label: 'Top 3 categorias', value: formatPercent(topThreeCategoryShare), color: COLORS.slate }
+            ]
         },
         {
             title: 'Fluxo Financeiro (Sankey)',
             canvas: drawFlowChart(reportData.flowData),
-            insights: insights.flow
+            insights: insights.flow,
+            metrics: [
+                { label: 'Fluxo líder', value: topLink ? `${topLink.source} → ${topLink.target}` : 'Sem fluxo', color: COLORS.blue },
+                { label: 'Valor do fluxo', value: formatCurrency(topLink?.value || 0), color: COLORS.cyan },
+                { label: 'Conexões', value: `${reportData.flowData.links.length}`, color: COLORS.slate }
+            ]
         },
         {
             title: 'Mapa de Calor (Dias da Semana)',
@@ -2208,7 +2633,12 @@ export const generateConsumptionAnalysisPdf = async ({
                     item.value > 5 ? '#E91E63' : item.value > 2 ? '#FF9800' : '#00E5FF'
                 )
             }),
-            insights: insights.heatmap
+            insights: insights.heatmap,
+            metrics: [
+                { label: 'Dia dominante', value: dominantDay?.name || 'Sem destaque', color: COLORS.blue },
+                { label: 'Registros', value: `${dominantDay?.value || 0}`, color: COLORS.cyan },
+                { label: 'Fim de semana', value: formatPercent(weekendShare), color: COLORS.slate }
+            ]
         },
         {
             title: 'Histograma de Frequência por Cupom',
@@ -2225,13 +2655,42 @@ export const generateConsumptionAnalysisPdf = async ({
                 tickFormatter: (value) => `${Math.round(value)}`,
                 labelRotation: -Math.PI / 5
             }),
-            insights: insights.ticketHistogram
+            insights: insights.ticketHistogram,
+            metrics: [
+                { label: 'Faixa dominante', value: dominantTicketBucket?.label || 'Sem faixa', color: COLORS.blue },
+                { label: 'Cupons na faixa', value: `${dominantTicketBucket?.count || 0}`, color: COLORS.cyan },
+                { label: 'Tickets baixos', value: formatPercent(lowTicketShare), color: COLORS.slate }
+            ]
         }
     ];
 
     chartPages.forEach((chartPage) => {
         pdf.addPage();
-        addChartPage(pdf, insights.summary.title, chartPage.title, chartPage.canvas, chartPage.insights);
+        addAnalyticalChartPage(pdf, insights.summary.title, chartPage.title, chartPage.canvas, chartPage.insights, chartPage.metrics);
+    });
+
+    pdf.addPage();
+    addPaginatedTable({
+        pdf,
+        reportTitle: insights.summary.title,
+        pageTitle: 'Pagamento por Categoria',
+        introText: 'Matriz completa com a categoria, o meio de pagamento utilizado, o total movimentado, o volume de cupons e a participação daquela combinação dentro da própria categoria.',
+        columns: [
+            { label: 'Categoria', width: 170 },
+            { label: 'Forma de pagamento', width: 150 },
+            { label: 'Valor movimentado', width: 95 },
+            { label: 'Cupons', width: 40 },
+            { label: '% da categoria', width: 60 }
+        ],
+        rows: reportData.categoryPaymentMethodData,
+        mapRow: (item) => [
+            item.category,
+            item.paymentMethod,
+            formatCurrency(item.value),
+            `${item.receiptCount}`,
+            formatPercent((item.categoryShare || 0) * 100)
+        ],
+        emptyMessage: 'Ainda não há registros suficientes de formas de pagamento para montar a tabela analítica do período.'
     });
 
     addInflationOverviewPage(pdf, insights.summary.title, reportData, insights);
@@ -2243,12 +2702,12 @@ export const generateConsumptionAnalysisPdf = async ({
         pageTitle: 'Inflação por Produto',
         introText: 'Tabela completa dos produtos comparáveis usados no cálculo do índice de inflação pessoal.',
         columns: [
-            { label: 'Produto', width: 190 },
-            { label: 'Período', width: 88 },
-            { label: 'Anterior', width: 58 },
-            { label: 'Atual', width: 58 },
-            { label: 'Inflação', width: 55, color: getVariationColor },
-            { label: 'Impacto', width: 66 }
+            { label: 'Produto e contexto', width: 190 },
+            { label: 'Período comparado', width: 88 },
+            { label: 'Preço anterior', width: 58 },
+            { label: 'Preço atual', width: 58 },
+            { label: 'Variação (%)', width: 55, color: getVariationColor },
+            { label: 'Impacto financeiro', width: 66 }
         ],
         rows: reportData.inflation.productInflationData,
         mapRow: (item) => [
@@ -2273,10 +2732,10 @@ export const generateConsumptionAnalysisPdf = async ({
         pageTitle: 'Inflação por Categoria',
         introText: 'Agrupamento das variações de preço por categoria com base nos mesmos produtos comparáveis do índice de inflação pessoal.',
         columns: [
-            { label: 'Categoria', width: 230 },
-            { label: 'Produtos', width: 70 },
-            { label: 'Inflação', width: 90, color: getVariationColor },
-            { label: 'Impacto', width: 125 }
+            { label: 'Categoria analisada', width: 230 },
+            { label: 'Produtos comparáveis', width: 70 },
+            { label: 'Inflação média', width: 90, color: getVariationColor },
+            { label: 'Impacto financeiro', width: 125 }
         ],
         rows: reportData.inflation.categoryInflationData,
         mapRow: (item) => [

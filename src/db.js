@@ -1,5 +1,6 @@
 import Dexie from 'dexie';
 import { normalizePaymentMethod } from './utils/paymentMethods';
+import { buildPixExpenseIdentityKey } from './utils/qrCode';
 
 export const db = new Dexie('AccountingAppDB');
 
@@ -48,6 +49,147 @@ db.version(5).stores({
   categories: '++id, name, color',
   productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
   productKnowledge: '++id, &name, category'
+});
+
+db.version(6).stores({
+  receipts: '++id, establishment, date, totalValue, url, &accessKey, receiptNumber, paymentMethod',
+  products: '++id, receiptId, name, brand, category, unitPrice, quantity, totalValue, paymentMethod',
+  categories: '++id, name, color',
+  productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
+  productKnowledge: '++id, &name, category',
+  forecastValidationSnapshots: '++id, &key, level, scope, scopeKey, dateKey, monthKey, referenceDateKey',
+  forecastModelConfigs: '&id, updatedAt, lastRecalibratedAt'
+});
+
+db.version(7).stores({
+  receipts: '++id, establishment, date, totalValue, url, &accessKey, receiptNumber, paymentMethod',
+  products: '++id, receiptId, name, brand, category, unitPrice, quantity, totalValue, paymentMethod',
+  categories: '++id, name, color',
+  productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
+  productKnowledge: '++id, &name, category',
+  forecastValidationSnapshots: '++id, &key, level, scope, scopeKey, dateKey, monthKey, referenceDateKey',
+  forecastModelConfigs: '&id, updatedAt, lastRecalibratedAt',
+  pixExpenses: '++id, type, origin, paymentMethod, receiver, date, value, category, subcategory, confirmationStatus, txid'
+});
+
+db.version(8).stores({
+  receipts: '++id, establishment, date, totalValue, url, &accessKey, receiptNumber, paymentMethod',
+  products: '++id, receiptId, name, brand, category, unitPrice, quantity, totalValue, paymentMethod',
+  categories: '++id, name, color',
+  productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
+  productKnowledge: '++id, &name, category',
+  forecastValidationSnapshots: '++id, &key, level, scope, scopeKey, dateKey, monthKey, referenceDateKey',
+  forecastModelConfigs: '&id, updatedAt, lastRecalibratedAt',
+  pixExpenses: '++id, expenseKey, type, origin, paymentMethod, receiver, date, value, category, subcategory, confirmationStatus, txid'
+}).upgrade(async (tx) => {
+  const pixExpensesTable = tx.table('pixExpenses');
+  const expenses = await pixExpensesTable.toArray();
+  const seenKeys = new Set();
+  const sortedExpenses = expenses
+    .slice()
+    .sort((left, right) => (
+      String(left.createdAt || left.date || '').localeCompare(String(right.createdAt || right.date || ''))
+      || (Number(left.id) || 0) - (Number(right.id) || 0)
+    ));
+
+  for (const expense of sortedExpenses) {
+    const expenseKey = buildPixExpenseIdentityKey(expense);
+
+    if (seenKeys.has(expenseKey)) {
+      await pixExpensesTable.delete(expense.id);
+      continue;
+    }
+
+    seenKeys.add(expenseKey);
+    await pixExpensesTable.put({
+      ...expense,
+      expenseKey,
+    });
+  }
+});
+
+db.version(9).stores({
+  receipts: '++id, establishment, date, totalValue, url, &accessKey, receiptNumber, paymentMethod',
+  products: '++id, receiptId, name, brand, category, unitPrice, quantity, totalValue, paymentMethod',
+  categories: '++id, name, color',
+  productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
+  productKnowledge: '++id, &name, category',
+  forecastValidationSnapshots: '++id, &key, level, scope, scopeKey, dateKey, monthKey, referenceDateKey',
+  forecastModelConfigs: '&id, updatedAt, lastRecalibratedAt',
+  pixExpenses: '++id, &expenseKey, type, origin, paymentMethod, receiver, date, value, category, subcategory, confirmationStatus, txid'
+}).upgrade(async (tx) => {
+  const pixExpensesTable = tx.table('pixExpenses');
+  const expenses = await pixExpensesTable.toArray();
+  const seenKeys = new Set();
+  const sortedExpenses = expenses
+    .slice()
+    .sort((left, right) => (
+      String(left.createdAt || left.date || '').localeCompare(String(right.createdAt || right.date || ''))
+      || (Number(left.id) || 0) - (Number(right.id) || 0)
+    ));
+
+  for (const expense of sortedExpenses) {
+    const expenseKey = buildPixExpenseIdentityKey(expense);
+
+    if (seenKeys.has(expenseKey)) {
+      await pixExpensesTable.delete(expense.id);
+      continue;
+    }
+
+    seenKeys.add(expenseKey);
+    await pixExpensesTable.put({
+      ...expense,
+      expenseKey,
+    });
+  }
+});
+
+db.version(10).stores({
+  receipts: '++id, establishment, date, totalValue, url, &accessKey, receiptNumber, paymentMethod',
+  products: '++id, receiptId, name, brand, category, unitPrice, quantity, totalValue, paymentMethod',
+  categories: '++id, name, color',
+  productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
+  productKnowledge: '++id, &name, category',
+  forecastValidationSnapshots: '++id, &key, level, scope, scopeKey, dateKey, monthKey, referenceDateKey',
+  forecastModelConfigs: '&id, updatedAt, lastRecalibratedAt',
+  pixExpenses: '++id, &expenseKey, type, origin, paymentMethod, receiver, date, value, category, subcategory, confirmationStatus, txid'
+}).upgrade(async (tx) => {
+  const pixExpensesTable = tx.table('pixExpenses');
+  const expenses = await pixExpensesTable.toArray();
+  const seenKeys = new Set();
+  const sortedExpenses = expenses
+    .slice()
+    .sort((left, right) => (
+      String(left.createdAt || left.date || '').localeCompare(String(right.createdAt || right.date || ''))
+      || (Number(left.id) || 0) - (Number(right.id) || 0)
+    ));
+
+  for (const expense of sortedExpenses) {
+    const expenseKey = buildPixExpenseIdentityKey(expense);
+
+    if (seenKeys.has(expenseKey)) {
+      await pixExpensesTable.delete(expense.id);
+      continue;
+    }
+
+    seenKeys.add(expenseKey);
+    await pixExpensesTable.put({
+      ...expense,
+      expenseKey,
+    });
+  }
+});
+
+db.version(11).stores({
+  receipts: '++id, establishment, date, totalValue, url, &accessKey, receiptNumber, paymentMethod',
+  products: '++id, receiptId, name, brand, category, unitPrice, quantity, totalValue, paymentMethod',
+  categories: '++id, name, color',
+  productAliases: '++id, leftName, rightName, leftKey, rightKey, &[leftKey+rightKey], createdAt',
+  productKnowledge: '++id, &name, category',
+  forecastValidationSnapshots: '++id, &key, level, scope, scopeKey, dateKey, monthKey, referenceDateKey',
+  forecastModelConfigs: '&id, updatedAt, lastRecalibratedAt',
+  pixExpenses: '++id, &expenseKey, type, origin, paymentMethod, receiver, date, value, category, subcategory, confirmationStatus, txid',
+  foodClassificationOverrides: '++id, &key, displayName, classification, updatedAt'
 });
 
 // Seed initial categories

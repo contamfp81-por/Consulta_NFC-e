@@ -17,9 +17,9 @@ class ErrorBoundary extends Component {
     render() {
         if (this.state.hasError) {
             return (
-                <div style={{ padding: '20px', textAlign: 'center', background: '#fff', borderRadius: '15px', margin: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-                    <h2 style={{ color: '#ff5252' }}>Algo deu errado no componente.</h2>
-                    <p style={{ fontSize: '0.9rem', color: '#666', margin: '10px 0' }}>
+                <div className="premium-surface" style={{ textAlign: 'center', marginTop: '12px' }}>
+                    <h2 style={{ color: 'var(--danger-red)', marginBottom: '8px' }}>Algo deu errado no componente.</h2>
+                    <p style={{ fontSize: '0.9rem', color: 'var(--text-light)', margin: '10px 0' }}>
                         {this.state.error?.message || "Erro desconhecido"}
                     </p>
                     <button

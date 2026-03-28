@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
@@ -12,8 +12,18 @@ import {
     Layers, Activity, Target, Layout, Hash, Thermometer, FileText, Loader2,
     Search, Wallet, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import ForecastPrecisionModule from './ForecastPrecisionModule';
 import { generateConsumptionAnalysisPdf } from '../utils/export';
 import { buildProductGrouping, getProductGroup } from '../utils/productGrouping';
+import { summarizeReceiptsByOrigin } from '../utils/financeInsights';
+import {
+    DEFAULT_FORECAST_MODEL_CONFIG,
+    buildForecastDataset,
+    buildForecastValidationModule,
+    calculateForecastForObservedDays,
+    getForecastModelConfig,
+    getWeekStartKey
+} from '../utils/forecastModel';
 import { normalizePaymentMethod, PAYMENT_METHOD_NOT_INFORMED } from '../utils/paymentMethods';
 
 const COLORS = [
@@ -22,6 +32,25 @@ const COLORS = [
 ];
 
 const ESTABLISHMENT_SUFFIXES = new Set(['LTDA', 'LTD', 'S/A', 'SA', 'ME', 'EIRELI', 'EPP', 'EI']);
+const WEEKDAY_OPTIONS = [
+    { index: 1, shortLabel: 'Seg', fullLabel: 'Segunda-feira' },
+    { index: 2, shortLabel: 'Ter', fullLabel: 'Terca-feira' },
+    { index: 3, shortLabel: 'Qua', fullLabel: 'Quarta-feira' },
+    { index: 4, shortLabel: 'Qui', fullLabel: 'Quinta-feira' },
+    { index: 5, shortLabel: 'Sex', fullLabel: 'Sexta-feira' },
+    { index: 6, shortLabel: 'Sab', fullLabel: 'Sabado' },
+    { index: 0, shortLabel: 'Dom', fullLabel: 'Domingo' }
+];
+
+const getHeatmapBarColor = (value, maxValue) => {
+    if (!maxValue || value <= 0) return 'rgba(71, 85, 105, 0.45)';
+
+    const ratio = value / maxValue;
+    if (ratio >= 0.85) return '#22C55E';
+    if (ratio >= 0.55) return '#38BDF8';
+    if (ratio >= 0.3) return '#818CF8';
+    return '#475569';
+};
 
 const getDateKey = (value) => {
     const date = new Date(value);
@@ -76,6 +105,9 @@ const formatVariationPercent = (value) => {
 };
 
 const formatSharePercent = (value) => `${(Number(value || 0) * 100).toFixed(1)}%`;
+const buildPixSyntheticReceiptId = (pixExpenseId) => `pix-receipt-${pixExpenseId}`;
+const buildPixSyntheticProductId = (pixExpenseId) => `pix-product-${pixExpenseId}`;
+const isPixSyntheticProduct = (product) => Boolean(product?.isPixSynthetic || String(product?.origin || '').toLowerCase() === 'qr_pix');
 
 const safeRatio = (numerator, denominator) => (denominator > 0 ? numerator / denominator : 0);
 
@@ -101,6 +133,18 @@ const ESSENTIAL_CATEGORY_KEYS = new Set([
     'combustivel'
 ]);
 
+const FORECAST_SIGNAL_LABELS = {
+    avg7: 'Media 7 dias',
+    avg30: 'Media 30 dias',
+    trend: 'Tendencia recente',
+    weekday: 'Padrao do dia da semana',
+    monthPosition: 'Posicao no mes',
+    recurrence: 'Recorrencia'
+};
+
+const DAILY_FORECAST_FIELDS = ['avg7', 'avg30', 'trend', 'weekday', 'monthPosition', 'recurrence'];
+const CATEGORY_FORECAST_FIELDS = ['avg7', 'avg30', 'trend', 'weekday', 'recurrence'];
+
 const getMonthKey = (value) => {
     const dateKey = getDateKey(value);
     return dateKey ? dateKey.slice(0, 7) : null;
@@ -122,6 +166,20 @@ const formatMonthReferenceLabel = (monthKey) => {
     });
 
     return label.charAt(0).toUpperCase() + label.slice(1);
+};
+
+const formatCompactMonthReferenceLabel = (monthKey) => {
+    if (!monthKey) return '--';
+
+    const [year, month] = monthKey.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, 1));
+    if (Number.isNaN(date.getTime())) return monthKey;
+
+    return date.toLocaleDateString('pt-BR', {
+        month: 'short',
+        year: '2-digit',
+        timeZone: 'UTC'
+    }).replace('.', '').replace(' de ', '/');
 };
 
 const formatMonthDayLabel = (value) => {
@@ -193,17 +251,17 @@ const MAX_TABLE_SECTION_HEIGHT = 'min(48vh, 360px)';
 const RESPONSIVE_CARD_GRID = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
-    gap: '20px'
+    gap: '24px'
 };
 const RESPONSIVE_SUMMARY_GRID = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))',
-    gap: '14px'
+    gap: '18px'
 };
 const RESPONSIVE_FILTER_GRID = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))',
-    gap: '10px',
+    gap: '14px',
     alignItems: 'stretch'
 };
 const SCROLLABLE_CARD_BODY = {
@@ -218,21 +276,126 @@ const CardCarouselItem = ({ index, currentIndex, children }) => {
     return <div className="animate-slide-up" style={{ width: '100%' }}>{children}</div>;
 };
 
-const Dashboard = () => {
+const ChartCard = ({ title, icon, children, fullWidth = false, contentHeight = DEFAULT_CHART_HEIGHT, note = '' }) => {
+    const IconComponent = icon;
+
+    return (
+        <div
+            className="glass-card"
+            style={{
+                gridColumn: fullWidth ? '1/-1' : 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                maxHeight: MAX_CARD_VIEWPORT_HEIGHT,
+                overflow: 'hidden'
+            }}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+                <div style={{ padding: '8px', background: 'rgba(26, 35, 126, 0.1)', borderRadius: '10px', color: 'var(--primary-blue)' }}>
+                    <IconComponent size={18} />
+                </div>
+                <h4 style={{ margin: 0, fontSize: '0.95rem' }}>{title}</h4>
+            </div>
+            <div
+                style={{
+                    height: contentHeight,
+                    minHeight: '220px',
+                    maxHeight: `calc(${MAX_CARD_VIEWPORT_HEIGHT} - 88px)`,
+                    width: '100%',
+                    overflowY: 'auto',
+                    overflowX: 'hidden'
+                }}
+            >
+                {children}
+            </div>
+            {note && (
+                <div style={{ marginTop: '12px', fontSize: '0.78rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
+                    {note}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const Dashboard = ({ onOpenForecastPrecision }) => {
     const [currentCardIndex, setCurrentCardIndex] = useState(0);
     const [selectedCategory, setSelectedCategory] = useState(null);
     const receiptsQuery = useLiveQuery(() => db.receipts.toArray());
     const productsQuery = useLiveQuery(() => db.products.toArray());
+    const pixExpensesQuery = useLiveQuery(() => db.pixExpenses.toArray());
     const productAliasesQuery = useLiveQuery(() => db.productAliases.toArray());
+    const forecastModelConfigQuery = useLiveQuery(() => db.forecastModelConfigs.get('primary'));
     const [selectedProductGroupIds, setSelectedProductGroupIds] = useState([]);
     const [productSearchTerm, setProductSearchTerm] = useState('');
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
     const [reportFeedback, setReportFeedback] = useState('');
     const [startDateFilter, setStartDateFilter] = useState('');
     const [endDateFilter, setEndDateFilter] = useState('');
-    const receipts = useMemo(() => receiptsQuery || [], [receiptsQuery]);
-    const products = useMemo(() => productsQuery || [], [productsQuery]);
+    const forecastPersistenceSignatureRef = useRef('');
+    const productOptionsListRef = useRef(null);
+    const shouldRestoreProductListScrollRef = useRef(false);
+    const productOptionsScrollTopRef = useRef(0);
+    const pixExpenses = useMemo(() => pixExpensesQuery || [], [pixExpensesQuery]);
+    const pixSyntheticReceipts = useMemo(() => pixExpenses.map((pixExpense) => ({
+        id: buildPixSyntheticReceiptId(pixExpense.id),
+        establishment: pixExpense.receiver || pixExpense.category || 'Despesa Pix',
+        date: pixExpense.date,
+        totalValue: Number(pixExpense.value) || 0,
+        url: '',
+        accessKey: `PIX-${pixExpense.id}`,
+        receiptNumber: 'PIX',
+        paymentMethod: 'Pix',
+        isPartial: false,
+        origin: 'qr_pix',
+        isPixSynthetic: true,
+        pixExpenseId: pixExpense.id
+    })), [pixExpenses]);
+    const pixSyntheticProducts = useMemo(() => pixExpenses.map((pixExpense) => {
+        const itemValue = Number(pixExpense.value) || 0;
+        const categoryName = pixExpense.category || 'Outros';
+
+        return {
+            id: buildPixSyntheticProductId(pixExpense.id),
+            receiptId: buildPixSyntheticReceiptId(pixExpense.id),
+            name: categoryName,
+            brand: pixExpense.receiver || 'Despesa Pix',
+            quantity: 1,
+            unit: 'UN',
+            unitPrice: itemValue,
+            totalValue: itemValue,
+            category: categoryName,
+            paymentMethod: 'Pix',
+            origin: 'qr_pix',
+            isPixSynthetic: true,
+            pixExpenseId: pixExpense.id
+        };
+    }), [pixExpenses]);
+    const receipts = useMemo(
+        () => [...(receiptsQuery || []), ...pixSyntheticReceipts],
+        [pixSyntheticReceipts, receiptsQuery]
+    );
+    const products = useMemo(
+        () => [...(productsQuery || []), ...pixSyntheticProducts],
+        [pixSyntheticProducts, productsQuery]
+    );
     const productAliases = useMemo(() => productAliasesQuery || [], [productAliasesQuery]);
+    const forecastModelConfig = useMemo(
+        () => getForecastModelConfig(forecastModelConfigQuery || DEFAULT_FORECAST_MODEL_CONFIG),
+        [forecastModelConfigQuery]
+    );
+    const forecastDataset = useMemo(
+        () => buildForecastDataset({ receipts, products }),
+        [products, receipts]
+    );
+    const hasPixSyntheticExpenses = pixExpenses.length > 0;
+    const pixCoverageNotes = useMemo(() => ({
+        productEvolution: hasPixSyntheticExpenses
+            ? 'Despesas via QR Pix entram no dashboard como item sintetico de 1 unidade na categoria classificada. Este grafico de preco nao usa esses lancamentos porque eles nao possuem historico real de preco por produto.'
+            : '',
+        inflation: hasPixSyntheticExpenses
+            ? 'Despesas via QR Pix entram no dashboard como item sintetico para contabilizacao do gasto total. O indice de inflacao nao usa esses lancamentos porque eles nao possuem comparacao de preco entre produtos equivalentes.'
+            : ''
+    }), [hasPixSyntheticExpenses]);
 
     const productGrouping = useMemo(
         () => buildProductGrouping({ products, aliases: productAliases }),
@@ -257,6 +420,17 @@ const Dashboard = () => {
         setStartDateFilter((currentValue) => (currentValue ? currentValue : dateBounds.min));
         setEndDateFilter((currentValue) => (currentValue ? currentValue : dateBounds.max));
     }, [dateBounds.max, dateBounds.min]);
+
+    useEffect(() => {
+        if (forecastModelConfigQuery) {
+            return;
+        }
+
+        db.forecastModelConfigs.put({
+            ...DEFAULT_FORECAST_MODEL_CONFIG,
+            updatedAt: new Date().toISOString()
+        });
+    }, [forecastModelConfigQuery]);
 
     const normalizedDateRange = useMemo(() => {
         if (!dateBounds.min || !dateBounds.max) {
@@ -323,15 +497,6 @@ const Dashboard = () => {
             .map(([date, value]) => ({ date, value }))
             .sort((a, b) => a.date.localeCompare(b.date));
 
-        // Evolution by Month (for better scalability if there are many entries)
-        const monthMap = {};
-        filteredReceipts.forEach(r => {
-            const date = new Date(r.date);
-            if (Number.isNaN(date.getTime())) return;
-            const monthKey = date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
-            monthMap[monthKey] = (monthMap[monthKey] || 0) + (Number(r.totalValue) || 0);
-        });
-
         // 4: Stacked Data (Stores over time - last 5 stores)
         const top5Stores = storeData.slice(0, 5).map((store) => ({
             key: store.name,
@@ -339,14 +504,21 @@ const Dashboard = () => {
         }));
         const stackedMap = {};
         filteredReceipts.forEach(r => {
-            const dateStr = new Date(r.date).toLocaleDateString('pt-BR', { month: 'short' });
-            if (!stackedMap[dateStr]) stackedMap[dateStr] = { month: dateStr };
+            const monthKey = getMonthKey(r.date);
+            if (!monthKey) return;
+            if (!stackedMap[monthKey]) {
+                stackedMap[monthKey] = {
+                    monthKey,
+                    month: formatCompactMonthReferenceLabel(monthKey)
+                };
+            }
             const store = r.establishment || 'Outros';
             if (top5Stores.some((topStore) => topStore.key === store)) {
-                stackedMap[dateStr][store] = (stackedMap[dateStr][store] || 0) + (Number(r.totalValue) || 0);
+                stackedMap[monthKey][store] = (stackedMap[monthKey][store] || 0) + (Number(r.totalValue) || 0);
             }
         });
-        const stackedData = Object.values(stackedMap);
+        const stackedData = Object.values(stackedMap)
+            .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
 
         // 5: Accumulated Area
         let runningTotal = 0;
@@ -367,7 +539,7 @@ const Dashboard = () => {
             if (!recurrenceMap[key]) {
                 recurrenceMap[key] = {
                     id: key,
-                    name: group.displayName.substring(0, 20),
+                    name: group.displayName,
                     receipts: new Set(),
                     totalValue: 0
                 };
@@ -381,12 +553,12 @@ const Dashboard = () => {
             .sort((a, b) => b.value - a.value);
 
         let cumulative = 0;
-        const totalSum = fullProdData.reduce((a, b) => a + b.value, 0);
+        const totalProductSum = filteredProducts.reduce((sum, product) => sum + (Number(product.totalValue) || 0), 0);
         const totalReceiptSum = filteredReceipts.reduce((sum, r) => sum + (Number(r.totalValue) || 0), 0);
 
         const paretoData = fullProdData.slice(0, 10).map(p => {
             cumulative += p.value;
-            return { ...p, percentage: (cumulative / totalSum) * 100 };
+            return { ...p, percentage: totalProductSum > 0 ? (cumulative / totalProductSum) * 100 : 0 };
         });
 
         const topRecurringProducts = Object.values(recurrenceMap)
@@ -394,7 +566,7 @@ const Dashboard = () => {
                 name: p.name,
                 recurrenceCount: p.receipts.size,
                 totalValue: p.totalValue,
-                impactPercentage: totalSum > 0 ? (p.totalValue / totalSum) * 100 : 0
+                impactPercentage: totalProductSum > 0 ? (p.totalValue / totalProductSum) * 100 : 0
             }))
             .sort((a, b) => b.recurrenceCount - a.recurrenceCount || b.totalValue - a.totalValue)
             .slice(0, 5);
@@ -413,29 +585,210 @@ const Dashboard = () => {
             .map(([name, value]) => ({
                 name,
                 value,
-                percentage: totalSum > 0 ? (value / totalSum) * 100 : 0
+                percentage: totalProductSum > 0 ? (value / totalProductSum) * 100 : 0
             }))
             .sort((a, b) => b.value - a.value);
 
         // 9: Histogram (Price distribution)
-        const ranges = [0, 5, 10, 20, 50, 100, 500];
-        const histMap = {};
+        const histogramRanges = [
+            { label: `Até ${formatCurrencyValue(5)}`, max: 5, count: 0 },
+            { label: `Até ${formatCurrencyValue(10)}`, max: 10, count: 0 },
+            { label: `Até ${formatCurrencyValue(20)}`, max: 20, count: 0 },
+            { label: `Até ${formatCurrencyValue(50)}`, max: 50, count: 0 },
+            { label: `Até ${formatCurrencyValue(100)}`, max: 100, count: 0 },
+            { label: `Até ${formatCurrencyValue(500)}`, max: 500, count: 0 },
+            { label: `Acima de ${formatCurrencyValue(500)}`, max: Infinity, count: 0 }
+        ];
         filteredProducts.forEach(p => {
-            const price = Number(p.unitPrice);
-            const range = ranges.find((r, i) => price <= (ranges[i + 1] || Infinity));
-            const label = price > 500 ? '> 500' : `Até R$${ranges[ranges.indexOf(range) + 1] || 500}`;
-            histMap[label] = (histMap[label] || 0) + 1;
+            const price = Number(p.unitPrice) || 0;
+            const bucket = histogramRanges.find((range) => price <= range.max) || histogramRanges[histogramRanges.length - 1];
+            bucket.count += 1;
         });
-        const histogramData = Object.entries(histMap).map(([name, count]) => ({ name, count }));
+        const histogramData = histogramRanges
+            .filter((range) => range.count > 0)
+            .map(({ label, count }) => ({ name: label, count }));
 
         // 10: Heatmap (Weekday density)
         const weekMap = { 'Seg': 0, 'Ter': 0, 'Qua': 0, 'Qui': 0, 'Sex': 0, 'Sáb': 0, 'Dom': 0 };
         const weekKeys = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
         filteredReceipts.forEach(r => {
-            const day = weekKeys[new Date(r.date).getUTCDay()];
+            const day = weekKeys[new Date(r.date).getDay()];
             weekMap[day] = (weekMap[day] || 0) + 1;
         });
         const heatmapData = Object.entries(weekMap).map(([name, value]) => ({ name, value }));
+        const weekdayProductMap = new Map(
+            WEEKDAY_OPTIONS.map((item) => [item.shortLabel, {
+                name: item.shortLabel,
+                fullLabel: item.fullLabel,
+                purchaseCount: 0,
+                products: new Map(),
+                totalSpent: 0
+            }])
+        );
+        const receiptWeekdayMap = new Map();
+
+        filteredReceipts.forEach((receipt) => {
+            const receiptDate = new Date(receipt.date);
+            if (Number.isNaN(receiptDate.getTime())) {
+                return;
+            }
+
+            const weekday = WEEKDAY_OPTIONS.find((item) => item.index === receiptDate.getDay()) || WEEKDAY_OPTIONS[0];
+            const weekdayBucket = weekdayProductMap.get(weekday.shortLabel);
+            if (!weekdayBucket) {
+                return;
+            }
+
+            weekdayBucket.purchaseCount += 1;
+            weekdayBucket.totalSpent += Number(receipt.totalValue) || 0;
+            receiptWeekdayMap.set(receipt.id, weekday.shortLabel);
+        });
+
+        filteredProducts.forEach((product) => {
+            if (isPixSyntheticProduct(product)) {
+                return;
+            }
+
+            const weekdayKey = receiptWeekdayMap.get(product.receiptId);
+            const weekdayBucket = weekdayProductMap.get(weekdayKey);
+            if (!weekdayBucket) {
+                return;
+            }
+
+            const group = getProductGroup(productGrouping, product.name);
+            const quantity = Number(product.quantity) > 0 ? Number(product.quantity) : 1;
+            const unitPrice = Number(product.unitPrice) > 0
+                ? Number(product.unitPrice)
+                : ((Number(product.totalValue) || 0) > 0 ? (Number(product.totalValue) || 0) / quantity : 0);
+            const totalValue = Number(product.totalValue) > 0 ? Number(product.totalValue) : unitPrice * quantity;
+
+            if (!weekdayBucket.products.has(group.id)) {
+                weekdayBucket.products.set(group.id, {
+                    id: group.id,
+                    displayName: group.displayName,
+                    memberNames: group.memberNames,
+                    merged: group.merged,
+                    occurrences: 0,
+                    totalQuantity: 0,
+                    totalValue: 0,
+                    lowestUnitPrice: Infinity
+                });
+            }
+
+            const groupedProduct = weekdayBucket.products.get(group.id);
+            groupedProduct.occurrences += 1;
+            groupedProduct.totalQuantity += quantity;
+            groupedProduct.totalValue += totalValue;
+            if (unitPrice > 0) {
+                groupedProduct.lowestUnitPrice = Math.min(groupedProduct.lowestUnitPrice, unitPrice);
+            }
+        });
+
+        const weekdayOrderMap = new Map(WEEKDAY_OPTIONS.map((weekday, index) => [weekday.shortLabel, index]));
+        const weekdayProductsByDay = new Map(
+            WEEKDAY_OPTIONS.map((weekday) => {
+                const weekdayBucket = weekdayProductMap.get(weekday.shortLabel);
+                const products = Array.from(weekdayBucket?.products.values() || [])
+                    .map((product) => ({
+                        ...product,
+                        averageUnitPrice: product.totalQuantity > 0 ? product.totalValue / product.totalQuantity : 0,
+                        lowestUnitPrice: Number.isFinite(product.lowestUnitPrice) ? product.lowestUnitPrice : 0
+                    }));
+
+                return [weekday.shortLabel, products];
+            })
+        );
+
+        const cheapestWeekdayByProduct = new Map();
+        weekdayProductsByDay.forEach((products, weekdayKey) => {
+            products.forEach((product) => {
+                if (product.lowestUnitPrice <= 0) {
+                    return;
+                }
+
+                const currentBest = cheapestWeekdayByProduct.get(product.id);
+                const nextWeekdayOrder = weekdayOrderMap.get(weekdayKey) ?? Number.MAX_SAFE_INTEGER;
+
+                const shouldReplaceCurrentBest = !currentBest
+                    || product.lowestUnitPrice < currentBest.lowestUnitPrice
+                    || (
+                        product.lowestUnitPrice === currentBest.lowestUnitPrice
+                        && product.averageUnitPrice < currentBest.averageUnitPrice
+                    )
+                    || (
+                        product.lowestUnitPrice === currentBest.lowestUnitPrice
+                        && product.averageUnitPrice === currentBest.averageUnitPrice
+                        && product.occurrences > currentBest.occurrences
+                    )
+                    || (
+                        product.lowestUnitPrice === currentBest.lowestUnitPrice
+                        && product.averageUnitPrice === currentBest.averageUnitPrice
+                        && product.occurrences === currentBest.occurrences
+                        && nextWeekdayOrder < currentBest.weekdayOrder
+                    );
+
+                if (shouldReplaceCurrentBest) {
+                    cheapestWeekdayByProduct.set(product.id, {
+                        ...product,
+                        bestWeekday: weekdayKey,
+                        weekdayOrder: nextWeekdayOrder
+                    });
+                }
+            });
+        });
+
+        const weekdayProductInsights = WEEKDAY_OPTIONS.map((weekday) => {
+            const weekdayBucket = weekdayProductMap.get(weekday.shortLabel);
+            const products = weekdayProductsByDay.get(weekday.shortLabel) || [];
+
+            const topProducts = [...products]
+                .sort((left, right) => (
+                    right.occurrences - left.occurrences
+                    || right.totalQuantity - left.totalQuantity
+                    || left.displayName.localeCompare(right.displayName, 'pt-BR')
+                ))
+                .slice(0, 6);
+
+            const allCheapestProducts = Array.from(cheapestWeekdayByProduct.values())
+                .filter((product) => product.bestWeekday === weekday.shortLabel)
+                .sort((left, right) => (
+                    left.lowestUnitPrice - right.lowestUnitPrice
+                    || left.averageUnitPrice - right.averageUnitPrice
+                    || right.occurrences - left.occurrences
+                    || left.displayName.localeCompare(right.displayName, 'pt-BR')
+                ));
+            const cheapestProducts = allCheapestProducts;
+
+            return {
+                name: weekday.shortLabel,
+                fullLabel: weekday.fullLabel,
+                value: weekdayBucket?.purchaseCount || 0,
+                totalSpent: weekdayBucket?.totalSpent || 0,
+                averageTicket: (weekdayBucket?.purchaseCount || 0) > 0 ? (weekdayBucket.totalSpent / weekdayBucket.purchaseCount) : 0,
+                uniqueProducts: products.length,
+                cheapestProductCount: allCheapestProducts.length,
+                topProducts,
+                cheapestProducts
+            };
+        });
+
+        const weekdayHeatmapData = weekdayProductInsights.map((item) => ({
+            name: item.name,
+            fullLabel: item.fullLabel,
+            value: item.value,
+            totalSpent: item.totalSpent,
+            averageTicket: item.averageTicket,
+            uniqueProducts: item.uniqueProducts
+        }));
+        const hasPurchaseDataByWeekday = weekdayHeatmapData.some((item) => item.value > 0);
+        const maxWeekdayPurchaseCount = weekdayHeatmapData.reduce((maxValue, item) => Math.max(maxValue, item.value), 0);
+        const dominantWeekday = hasPurchaseDataByWeekday
+            ? [...weekdayHeatmapData]
+                .sort((left, right) => (
+                    right.value - left.value
+                    || right.totalSpent - left.totalSpent
+                ))[0] || null
+            : null;
 
         const receiptDateMap = new Map(
             filteredReceipts
@@ -513,8 +866,10 @@ const Dashboard = () => {
             }))
             .sort((left, right) => right.value - left.value);
 
+        const granularProducts = filteredProducts.filter((product) => !isPixSyntheticProduct(product));
+
         const productSelectionMap = new Map();
-        filteredProducts.forEach((product) => {
+        granularProducts.forEach((product) => {
             const group = getProductGroup(productGrouping, product.name);
             if (!productSelectionMap.has(group.id)) {
                 productSelectionMap.set(group.id, {
@@ -538,7 +893,7 @@ const Dashboard = () => {
             const selectedGroupIds = new Set(selectedProductGroupIds);
             const productEvolutionMap = {};
 
-            filteredProducts.forEach((product) => {
+            granularProducts.forEach((product) => {
                 const group = getProductGroup(productGrouping, product.name);
                 if (!selectedGroupIds.has(group.id)) {
                     return;
@@ -573,7 +928,7 @@ const Dashboard = () => {
         }
 
         const productHistoryMap = {};
-        filteredProducts.forEach((product) => {
+        granularProducts.forEach((product) => {
             const dateKey = receiptDateMap.get(product.receiptId);
             const unitPrice = Number(product.unitPrice);
             const quantity = Number(product.quantity) > 0 ? Number(product.quantity) : 1;
@@ -695,6 +1050,7 @@ const Dashboard = () => {
 
         return {
             totalSpent: totalReceiptSum,
+            productTotalSpent: totalProductSum,
             storeData,
             dailyEvolutionData,
             stackedData,
@@ -704,7 +1060,10 @@ const Dashboard = () => {
             categorySpendData,
             categoryPaymentMethodData,
             histogramData,
-            heatmapData,
+            heatmapData: weekdayHeatmapData,
+            weekdayProductInsights,
+            dominantWeekday,
+            maxWeekdayPurchaseCount,
             top5Stores,
             topRecurringProducts,
             paymentMethodSummaryData,
@@ -754,6 +1113,23 @@ const Dashboard = () => {
         return stats.productSelectionOptions.filter((option) => selectedGroupIds.has(option.id));
     }, [selectedProductGroupIds, stats]);
 
+    useEffect(() => {
+        if (!shouldRestoreProductListScrollRef.current || !productOptionsListRef.current) {
+            return;
+        }
+
+        const nextScrollTop = productOptionsScrollTopRef.current;
+        shouldRestoreProductListScrollRef.current = false;
+
+        const frameId = window.requestAnimationFrame(() => {
+            if (productOptionsListRef.current) {
+                productOptionsListRef.current.scrollTop = nextScrollTop;
+            }
+        });
+
+        return () => window.cancelAnimationFrame(frameId);
+    }, [selectedProductGroupIds]);
+
     const currentMonthInsight = useMemo(() => {
         const currentDateKey = getDateKey(new Date());
         if (!currentDateKey) return null;
@@ -778,12 +1154,24 @@ const Dashboard = () => {
 
         const monthReceiptIds = new Set(monthReceipts.map((receipt) => receipt.id));
         const monthProducts = products.filter((product) => monthReceiptIds.has(product.receiptId));
+        const forecastCore = calculateForecastForObservedDays({
+            dataset: forecastDataset,
+            monthKey: currentMonthKey,
+            observedDays: currentDay,
+            modelConfig: forecastModelConfig
+        });
+        const todayForecastCore = calculateForecastForObservedDays({
+            dataset: forecastDataset,
+            monthKey: currentMonthKey,
+            observedDays: Math.max(0, currentDay - 1),
+            modelConfig: forecastModelConfig
+        });
 
         const monthTotalSpent = monthReceipts.reduce(
             (sum, receipt) => sum + (Number(receipt.totalValue) || 0),
             0
         );
-        const averageDailySpend = monthTotalSpent / Math.max(1, currentDay);
+        const averageDailySpend = forecastCore?.averageDailySpend || (monthTotalSpent / Math.max(1, currentDay));
 
         const dayTotalsMap = {};
         monthReceipts.forEach((receipt) => {
@@ -802,6 +1190,7 @@ const Dashboard = () => {
                 value: dayTotalsMap[dateKey] || 0
             };
         });
+        const todaySpent = dayTotalsMap[currentDateKey] || 0;
 
         const recentWindowSize = Math.min(7, dailyTotals.length);
         const recentWindow = dailyTotals.slice(-recentWindowSize);
@@ -813,9 +1202,10 @@ const Dashboard = () => {
         const previousAverage = previousWindow.length
             ? averageValues(previousWindow.map((item) => item.value))
             : averageDailySpend;
-        const paceChange = previousAverage > 0
+        const fallbackPaceChange = previousAverage > 0
             ? (recentAverage - previousAverage) / previousAverage
             : recentAverage > 0 ? 1 : 0;
+        const paceChange = forecastCore?.paceChange ?? fallbackPaceChange;
 
         let paceLabel = 'Estavel';
         let paceColor = 'var(--primary-blue)';
@@ -833,11 +1223,27 @@ const Dashboard = () => {
 
         const activeDays = dailyTotals.filter((item) => item.value > 0).length;
         const activeDayAverage = monthTotalSpent / Math.max(1, activeDays);
-        const projectedTotal = averageDailySpend * totalDaysInMonth;
-        const projectedAdditionalSpend = Math.max(0, projectedTotal - monthTotalSpent);
+        const baselineProjectedTotal = averageDailySpend * totalDaysInMonth;
+        const projectedTotal = forecastCore?.projectedTotal ?? Math.max(
+            monthTotalSpent,
+            baselineProjectedTotal * (1 + (paceChange * 0.08))
+        );
+        const projectedAdditionalSpend = forecastCore?.projectedAdditionalSpend ?? Math.max(0, projectedTotal - monthTotalSpent);
+        const currentRunRate = forecastCore?.currentRunRate ?? (recentWindow.length ? recentAverage : averageDailySpend);
+        const todayPredictedSpend = todayForecastCore?.projectedDailySpend || forecastCore?.projectedDailySpend || 0;
+        const nextDayPredictedSpend = forecastCore?.projectedDailySpend || 0;
+        const todayForecastStatus = todayForecastCore?.confidenceStatus || forecastCore?.confidenceStatus || null;
+        const todayBehaviorSignal = todayForecastCore?.behaviorSignal || forecastCore?.behaviorSignal || null;
+        const todayCategoryForecastData = (todayForecastCore?.categoryForecastData || [])
+            .filter((item) => item.prediction > 0)
+            .slice(0, 6)
+            .map((item) => ({
+                ...item,
+                share: safeRatio(item.prediction, todayPredictedSpend)
+            }));
 
         let accumulatedActual = 0;
-        const projectionChartData = Array.from({ length: totalDaysInMonth }, (_, index) => {
+        const fallbackProjectionChartData = Array.from({ length: totalDaysInMonth }, (_, index) => {
             const dayNumber = index + 1;
             const dateKey = buildMonthDateKey(currentMonthKey, dayNumber);
             const dayValue = dayNumber <= currentDay ? (dayTotalsMap[dateKey] || 0) : 0;
@@ -847,12 +1253,10 @@ const Dashboard = () => {
             }
 
             // Calculations for different scenarios
-            const remainingDaysFromDay = Math.max(0, totalDaysInMonth - dayNumber);
-            
             // target values for the end of the month (matching the scenarios object below)
-            const targetProvavel = projectedTotal * (1 + (paceChange * 0.08));
+            const targetProvavel = projectedTotal;
             const targetConservador = monthTotalSpent + (Math.min(recentAverage, averageDailySpend) * 0.92 * (totalDaysInMonth - currentDay));
-            const targetPicos = Math.max(projectedTotal * 1.15, monthTotalSpent + (Math.max(...dailyTotals.map(d => d.value), averageDailySpend) * (totalDaysInMonth - currentDay)));
+            const targetPicos = Math.max(baselineProjectedTotal * 1.15, monthTotalSpent + (Math.max(...dailyTotals.map(d => d.value), averageDailySpend) * (totalDaysInMonth - currentDay)));
 
             // Daily increment for remaining part of the month
             const dailyIncProv = (targetProvavel - accumulatedActual) / Math.max(1, totalDaysInMonth - currentDay);
@@ -871,6 +1275,7 @@ const Dashboard = () => {
                 picos: dayNumber >= currentDay ? (dayNumber === currentDay ? accumulatedActual : projectedPicos) : null
             };
         });
+        const projectionChartData = forecastCore?.projectionChartData || fallbackProjectionChartData;
 
         const categoryMap = {};
         monthProducts.forEach((product) => {
@@ -914,13 +1319,7 @@ const Dashboard = () => {
             }))
             .sort((left, right) => right.value - left.value);
 
-        const manualReceipts = monthReceipts.filter((receipt) => (
-            String(receipt.accessKey || '').startsWith('MANUAL-')
-            || String(receipt.receiptNumber || '').toUpperCase() === 'MANUAL'
-        ));
-        const manualSpent = manualReceipts.reduce((sum, receipt) => sum + (Number(receipt.totalValue) || 0), 0);
-        const importedReceiptsCount = monthReceipts.length - manualReceipts.length;
-        const importedSpent = monthTotalSpent - manualSpent;
+        const receiptOriginSummary = summarizeReceiptsByOrigin(monthReceipts);
 
         const lowTicketShare = safeRatio(
             monthReceipts.filter((receipt) => (Number(receipt.totalValue) || 0) <= 50).length,
@@ -947,7 +1346,7 @@ const Dashboard = () => {
             dominantPaymentShare: dominantPaymentMethod?.share || 0
         });
 
-        const outlookSentence = `Até ${formatMonthDayLabel(currentDateKey)}, o mês de ${monthLabel} acumula ${formatCurrencyValue(monthTotalSpent)}. Mantido o ritmo médio de ${formatCurrencyValue(averageDailySpend)} por dia corrido, o fechamento estimado é de ${formatCurrencyValue(projectedTotal)}, com mais ${formatCurrencyValue(projectedAdditionalSpend)} até o último dia.`;
+        const outlookSentence = `Até ${formatMonthDayLabel(currentDateKey)}, o mês de ${monthLabel} acumula ${formatCurrencyValue(monthTotalSpent)}. No cenário provável do algoritmo, o fechamento estimado é de ${formatCurrencyValue(projectedTotal)}, com mais ${formatCurrencyValue(projectedAdditionalSpend)} até o último dia.`;
         const concentrationSentence = topCategory && topStore
             ? `${topCategory.name} lidera com ${formatSharePercent(topCategory.share)} do mês, enquanto ${topStore.name} concentra ${formatSharePercent(topStore.share)} do valor movimentado.`
             : 'A distribuição atual ainda está pouco concentrada entre categorias e estabelecimentos.';
@@ -969,8 +1368,11 @@ const Dashboard = () => {
             remainingDays,
             monthReceiptsCount: monthReceipts.length,
             monthProductsCount: monthProducts.length,
+            monthPixCount: receiptOriginSummary.pixCount,
             monthTotalSpent,
             averageDailySpend,
+            currentRunRate,
+            recentWindowSize,
             activeDayAverage,
             activeDays,
             projectedTotal,
@@ -981,32 +1383,132 @@ const Dashboard = () => {
             topCategory,
             topStore,
             dominantPaymentMethod,
-            manualReceiptsCount: manualReceipts.length,
-            manualSpent,
-            importedReceiptsCount,
-            importedSpent,
+            manualReceiptsCount: receiptOriginSummary.manualReceiptsCount,
+            manualSpent: receiptOriginSummary.manualSpent,
+            importedReceiptsCount: receiptOriginSummary.importedReceiptsCount,
+            importedSpent: receiptOriginSummary.importedSpent,
+            pixSpent: receiptOriginSummary.pixSpent,
             profile,
             outlookSentence,
             concentrationSentence,
             paymentSentence,
             actionSentence,
+            todaySpent,
+            todayPredictedSpend,
+            nextDayPredictedSpend,
+            todayForecastConfidence: todayForecastCore?.dailyConfidence || forecastCore?.dailyConfidence || 0,
+            todayForecastStatus,
+            todayBehaviorSignal,
+            todayCategoryForecastData,
             projectionChartData,
-            scenarios: {
+            scenarios: forecastCore?.scenarios || {
                 conservador: {
                     value: monthTotalSpent + (Math.min(recentAverage, averageDailySpend) * 0.92 * remainingDays),
                     description: 'Baseado na média móvel suavizada e redução de gastos impulsivos.'
                 },
                 provavel: {
-                    value: projectedTotal * (1 + (paceChange * 0.08)),
-                    description: 'Ponto de equilíbrio entre Holt-Winters e o Run Rate atual (92% de confiança).'
+                    value: projectedTotal,
+                    description: 'Combina sinais recentes, padrão semanal, posição no mês e recorrência para fechar o mês com o cenário mais provável.'
                 },
                 picos: {
-                    value: Math.max(projectedTotal * 1.15, monthTotalSpent + (Math.max(...dailyTotals.map(d => d.value), averageDailySpend) * remainingDays)),
+                    value: Math.max(baselineProjectedTotal * 1.15, monthTotalSpent + (Math.max(...dailyTotals.map(d => d.value), averageDailySpend) * remainingDays)),
                     description: 'Considera a reocorrência de gastos máximos sazonais detectados no histórico.'
                 }
+            },
+            algorithmWeights: todayForecastCore?.weights || forecastCore?.weights || forecastModelConfig.weights,
+            categoryAlgorithmWeights: todayForecastCore?.categoryWeights || forecastCore?.categoryWeights || forecastModelConfig.categoryWeights,
+            componentRates: todayForecastCore?.componentRates || forecastCore?.componentRates || null,
+            weightedComponents: todayForecastCore?.weightedComponents || forecastCore?.weightedComponents || null
+        };
+    }, [forecastDataset, forecastModelConfig, products, receipts]);
+
+    const forecastValidation = useMemo(
+        () => buildForecastValidationModule({
+            dataset: forecastDataset,
+            modelConfig: forecastModelConfig,
+            referenceDate: new Date()
+        }),
+        [forecastDataset, forecastModelConfig]
+    );
+
+    useEffect(() => {
+        if (!forecastValidation?.persistenceRecords?.length) {
+            forecastPersistenceSignatureRef.current = '';
+            db.forecastValidationSnapshots.clear();
+            return;
+        }
+
+        if (forecastPersistenceSignatureRef.current === forecastValidation.persistenceSignature) {
+            return;
+        }
+
+        let isCancelled = false;
+
+        const persistValidationSnapshots = async () => {
+            await db.transaction('rw', db.forecastValidationSnapshots, async () => {
+                await db.forecastValidationSnapshots.clear();
+                await db.forecastValidationSnapshots.bulkPut(forecastValidation.persistenceRecords);
+            });
+
+            if (!isCancelled) {
+                forecastPersistenceSignatureRef.current = forecastValidation.persistenceSignature;
             }
         };
-    }, [products, receipts]);
+
+        persistValidationSnapshots();
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [forecastValidation]);
+
+    useEffect(() => {
+        if (!forecastValidation?.recalibration?.shouldRecalibrate) {
+            return;
+        }
+
+        const recalibrationDateKey = getDateKey(new Date());
+        const recalibrationWeekKey = getWeekStartKey(recalibrationDateKey);
+        const currentWeightsSignature = JSON.stringify(forecastModelConfig.weights);
+        const nextWeightsSignature = JSON.stringify(forecastValidation.recalibration.recommendedWeights);
+        const currentCategoryWeightsSignature = JSON.stringify(forecastModelConfig.categoryWeights || {});
+        const nextCategoryWeightsSignature = JSON.stringify(
+            forecastValidation.recalibration.recommendedCategoryWeights
+            || forecastModelConfig.categoryWeights
+            || {}
+        );
+
+        if (
+            (
+                currentWeightsSignature === nextWeightsSignature
+                && currentCategoryWeightsSignature === nextCategoryWeightsSignature
+            )
+            || forecastModelConfig.lastRecalibratedAt === recalibrationWeekKey
+        ) {
+            return;
+        }
+
+        db.forecastModelConfigs.put({
+            ...forecastModelConfig,
+            id: 'primary',
+            weights: forecastValidation.recalibration.recommendedWeights,
+            categoryWeights: forecastValidation.recalibration.recommendedCategoryWeights || forecastModelConfig.categoryWeights,
+            recalibrationHistory: [
+                ...(forecastModelConfig.recalibrationHistory || []),
+                {
+                    appliedAt: recalibrationWeekKey,
+                    dailyBefore: forecastValidation.recalibration.currentWeights || forecastModelConfig.weights,
+                    dailyAfter: forecastValidation.recalibration.recommendedWeights,
+                    categoryBefore: forecastValidation.recalibration.currentCategoryWeights || forecastModelConfig.categoryWeights,
+                    categoryAfter: forecastValidation.recalibration.recommendedCategoryWeights || forecastModelConfig.categoryWeights,
+                    precisionBefore: forecastValidation.overallPrecision,
+                    projectedPrecision: forecastValidation.recalibration.projectedPrecision || forecastValidation.overallPrecision
+                }
+            ].slice(-12),
+            lastRecalibratedAt: recalibrationWeekKey,
+            updatedAt: new Date().toISOString()
+        });
+    }, [forecastModelConfig, forecastValidation]);
 
     if (!receipts.length || !products.length) {
         return (
@@ -1017,42 +1519,6 @@ const Dashboard = () => {
             </div>
         );
     }
-
-    const ChartCard = ({ title, icon, children, fullWidth = false, contentHeight = DEFAULT_CHART_HEIGHT }) => {
-        const IconComponent = icon;
-
-        return (
-        <div
-            className="glass-card"
-            style={{
-                gridColumn: fullWidth ? '1/-1' : 'auto',
-                display: 'flex',
-                flexDirection: 'column',
-                maxHeight: MAX_CARD_VIEWPORT_HEIGHT,
-                overflow: 'hidden'
-            }}
-        >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-                <div style={{ padding: '8px', background: 'rgba(26, 35, 126, 0.1)', borderRadius: '10px', color: 'var(--primary-blue)' }}>
-                    <IconComponent size={18} />
-                </div>
-                <h4 style={{ margin: 0, fontSize: '0.95rem' }}>{title}</h4>
-            </div>
-            <div
-                style={{
-                    height: contentHeight,
-                    minHeight: '220px',
-                    maxHeight: `calc(${MAX_CARD_VIEWPORT_HEIGHT} - 88px)`,
-                    width: '100%',
-                    overflowY: 'auto',
-                    overflowX: 'hidden'
-                }}
-            >
-                {children}
-            </div>
-        </div>
-        );
-    };
 
     const renderStoreLegend = ({ payload = [] }) => (
         <div
@@ -1103,6 +1569,11 @@ const Dashboard = () => {
     );
 
     const toggleProductSelection = (groupId) => {
+        if (productOptionsListRef.current) {
+            productOptionsScrollTopRef.current = productOptionsListRef.current.scrollTop;
+            shouldRestoreProductListScrollRef.current = true;
+        }
+
         setSelectedProductGroupIds((currentSelection) => (
             currentSelection.includes(groupId)
                 ? currentSelection.filter((currentGroupId) => currentGroupId !== groupId)
@@ -1139,11 +1610,34 @@ const Dashboard = () => {
         }
     };
 
+    const handleResetForecastWeights = () => {
+        const recalibrationDateKey = getDateKey(new Date());
+
+        db.forecastModelConfigs.put({
+            ...forecastModelConfig,
+            id: 'primary',
+            weights: DEFAULT_FORECAST_MODEL_CONFIG.weights,
+            categoryWeights: DEFAULT_FORECAST_MODEL_CONFIG.categoryWeights,
+            recalibrationHistory: [
+                ...(forecastModelConfig.recalibrationHistory || []),
+                {
+                    appliedAt: recalibrationDateKey,
+                    manualReset: true,
+                    dailyBefore: forecastModelConfig.weights,
+                    dailyAfter: DEFAULT_FORECAST_MODEL_CONFIG.weights,
+                    categoryBefore: forecastModelConfig.categoryWeights,
+                    categoryAfter: DEFAULT_FORECAST_MODEL_CONFIG.categoryWeights
+                }
+            ].slice(-12),
+            updatedAt: new Date().toISOString()
+        });
+    };
+
     const hasFilteredResults = Boolean(stats);
     const selectedPeriodLabel = normalizedDateRange.start && normalizedDateRange.end
         ? `${formatFilterDateLabel(normalizedDateRange.start)} até ${formatFilterDateLabel(normalizedDateRange.end)}`
         : 'Período completo';
-    const availablePeriodLabel = dateBounds.min && dateBounds.max
+    const _availablePeriodLabel = dateBounds.min && dateBounds.max
         ? `${formatFilterDateLabel(dateBounds.min)} atÃ© ${formatFilterDateLabel(dateBounds.max)}`
         : 'Sem intervalo disponivel';
     const isFullPeriodSelected = normalizedDateRange.start === dateBounds.min && normalizedDateRange.end === dateBounds.max;
@@ -1209,7 +1703,7 @@ const Dashboard = () => {
                                 {formatCurrencyValue(currentMonthInsight.monthTotalSpent)}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                {currentMonthInsight.monthReceiptsCount} cupons e {currentMonthInsight.monthProductsCount} itens registrados.
+                                {currentMonthInsight.monthReceiptsCount} lancamentos: {currentMonthInsight.importedReceiptsCount} cupons importados, {currentMonthInsight.manualReceiptsCount} cupons manuais e {currentMonthInsight.monthPixCount} Pix. {currentMonthInsight.monthProductsCount} itens registrados.
                             </div>
                         </div>
 
@@ -1219,7 +1713,7 @@ const Dashboard = () => {
                                 {formatCurrencyValue(currentMonthInsight.projectedTotal)}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                Projeção estatística até o fim do mês.
+                                Cenário provável do algoritmo até o fim do mês.
                             </div>
                         </div>
 
@@ -1229,7 +1723,7 @@ const Dashboard = () => {
                                 {formatCurrencyValue(currentMonthInsight.projectedAdditionalSpend)}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                Estimativa para os próximos {currentMonthInsight.remainingDays} dias.
+                                Diferença entre o acumulado atual e o fechamento provável.
                             </div>
                         </div>
 
@@ -1239,10 +1733,15 @@ const Dashboard = () => {
                                 {currentMonthInsight.paceLabel}
                             </div>
                             <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginTop: '6px' }}>
-                                {formatCurrencyValue(currentMonthInsight.averageDailySpend)} por dia corrido.
+                                {formatCurrencyValue(currentMonthInsight.currentRunRate)} por dia na janela recente de {currentMonthInsight.recentWindowSize} dias.
                             </div>
                         </div>
                     </div>
+
+                    <ForecastPrecisionModule
+                        validation={forecastValidation}
+                        onOpen={onOpenForecastPrecision}
+                    />
 
                     <div style={{ ...RESPONSIVE_CARD_GRID, marginBottom: '20px', alignItems: 'stretch' }}>
                         <div
@@ -1258,18 +1757,57 @@ const Dashboard = () => {
                                     Algoritmo de Previsão de Gastos
                                 </h5>
                                 <p style={{ margin: '10px 0', color: 'var(--text-dark)', fontSize: '0.86rem', lineHeight: 1.6, fontWeight: 500 }}>
-                                    Análise híbrida de séries temporais (Holt-Winters), Média Móvel Estabilizadora e Run Rate para previsão com meta de 92% de precisão, seguindo metodologias de análise de risco das maiores instituições financeiras globais.
+                                    Modelo em 4 camadas: previsão total do dia, previsão por categoria, ajuste por comportamento recente e recalibração semanal por erro real, com foco em adaptação contínua do consumo pessoal.
                                 </p>
                             </div>
 
+                            <div style={{ ...RESPONSIVE_SUMMARY_GRID, marginBottom: '18px' }}>
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(26, 35, 126, 0.08)' }}>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginBottom: '6px' }}>Previsão para hoje</div>
+                                    <div style={{ fontSize: '1.32rem', fontWeight: 800, color: 'var(--primary-blue)' }}>
+                                        {formatCurrencyValue(currentMonthInsight.todayPredictedSpend)}
+                                    </div>
+                                    <div style={{ fontSize: '0.77rem', color: 'var(--text-light)', marginTop: '6px' }}>
+                                        Real do dia até agora: {formatCurrencyValue(currentMonthInsight.todaySpent)}
+                                    </div>
+                                </div>
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(0, 229, 255, 0.1)' }}>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginBottom: '6px' }}>Próximo dia previsto</div>
+                                    <div style={{ fontSize: '1.32rem', fontWeight: 800 }}>
+                                        {formatCurrencyValue(currentMonthInsight.nextDayPredictedSpend)}
+                                    </div>
+                                    <div style={{ fontSize: '0.77rem', color: 'var(--text-light)', marginTop: '6px' }}>
+                                        Continuidade da curva após o dia atual.
+                                    </div>
+                                </div>
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(76, 175, 80, 0.1)' }}>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginBottom: '6px' }}>Confiança do dia</div>
+                                    <div style={{ fontSize: '1.32rem', fontWeight: 800, color: currentMonthInsight.todayForecastStatus?.color || 'var(--primary-blue)' }}>
+                                        {formatSharePercent((currentMonthInsight.todayForecastConfidence || 0) / 100)}
+                                    </div>
+                                    <div style={{ fontSize: '0.77rem', color: 'var(--text-light)', marginTop: '6px' }}>
+                                        {currentMonthInsight.todayForecastStatus?.badge || 'Sem leitura ainda'}
+                                    </div>
+                                </div>
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(255, 152, 0, 0.1)' }}>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginBottom: '6px' }}>Comportamento recente</div>
+                                    <div style={{ fontSize: '1.14rem', fontWeight: 800 }}>
+                                        {currentMonthInsight.todayBehaviorSignal?.label || 'Estável'}
+                                    </div>
+                                    <div style={{ fontSize: '0.77rem', color: 'var(--text-light)', marginTop: '6px' }}>
+                                        Fator aplicado: {Number(currentMonthInsight.todayBehaviorSignal?.factor || 1).toFixed(2)}x
+                                    </div>
+                                </div>
+                            </div>
+
                             {/* Multi-Scenario Projection Chart */}
-                            <div style={{ height: '400px', width: '100%', marginBottom: '25px', padding: '10px', background: 'white', borderRadius: '15px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                            <div style={{ height: '400px', width: '100%', marginBottom: '25px', padding: '10px', background: 'rgba(8, 19, 31, 0.78)', borderRadius: '15px', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart
                                         data={currentMonthInsight.projectionChartData}
                                         margin={{ top: 15, right: 20, left: 10, bottom: 40 }}
                                     >
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.05)" />
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
                                         <XAxis 
                                             dataKey="day" 
                                             axisLine={false} 
@@ -1286,7 +1824,7 @@ const Dashboard = () => {
                                             tickFormatter={(value) => `R$ ${value >= 1000 ? (value/1000).toFixed(1) + 'k' : value}`}
                                         />
                                         <Tooltip 
-                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 16px rgba(0,0,0,0.1)', fontSize: '0.86rem' }}
+                                            contentStyle={{ borderRadius: '12px', border: '1px solid rgba(148, 163, 184, 0.14)', background: '#0F2236', color: '#E2E8F0', boxShadow: '0 8px 16px rgba(0,0,0,0.22)', fontSize: '0.86rem' }}
                                             formatter={(value) => formatCurrencyValue(value)}
                                             labelFormatter={(label) => `Dia ${label}`}
                                         />
@@ -1376,8 +1914,117 @@ const Dashboard = () => {
                                 </table>
                             </div>
                             
-                            <div style={{ marginTop: '15px', padding: '12px', borderRadius: '12px', background: 'white', borderLeft: '4px solid var(--secondary-cyan)', fontSize: '0.78rem', color: 'var(--text-light)', fontStyle: 'italic' }}>
-                                A análise considera sazonalidade (Holt-Winters), Run Rate em tempo real e elasticidade de categorias para garantir integridade estatística sem alucinações.
+                            <div style={{ ...RESPONSIVE_CARD_GRID, marginTop: '16px', marginBottom: '16px' }}>
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(8, 19, 31, 0.72)', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
+                                    <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '10px' }}>
+                                        Previsão por categoria hoje
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '8px' }}>
+                                        {currentMonthInsight.todayCategoryForecastData.length > 0 ? currentMonthInsight.todayCategoryForecastData.map((item) => (
+                                            <div key={item.categoryName} style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(26, 35, 126, 0.04)' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '6px' }}>
+                                                    <strong style={{ fontSize: '0.82rem' }}>{item.categoryName}</strong>
+                                                    <span style={{ fontWeight: 700 }}>{formatCurrencyValue(item.prediction)}</span>
+                                                </div>
+                                                <div style={{ height: '8px', borderRadius: '999px', background: 'rgba(148, 163, 184, 0.16)', overflow: 'hidden', marginBottom: '6px' }}>
+                                                    <div style={{ width: `${Math.min(100, item.share * 100)}%`, height: '100%', background: 'var(--accent-gradient)' }} />
+                                                </div>
+                                                <div style={{ fontSize: '0.74rem', color: 'var(--text-light)' }}>
+                                                    Participação prevista: {formatSharePercent(item.share)}
+                                                </div>
+                                            </div>
+                                        )) : (
+                                            <div style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>
+                                                Ainda não há base suficiente por categoria para a previsão diária.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(8, 19, 31, 0.72)', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
+                                    <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '10px' }}>
+                                        Camadas 3 e 4: ajuste e precisão
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '10px' }}>
+                                        <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(255, 152, 0, 0.08)' }}>
+                                            <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: '4px' }}>
+                                                {currentMonthInsight.todayBehaviorSignal?.label || 'Estável'}
+                                            </div>
+                                            <div style={{ fontSize: '0.76rem', color: 'var(--text-light)' }}>
+                                                {currentMonthInsight.todayBehaviorSignal?.description || 'Sem ajuste adicional de comportamento recente.'}
+                                            </div>
+                                        </div>
+                                        <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(26, 35, 126, 0.05)' }}>
+                                            <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: '4px' }}>
+                                                Precisão geral: {formatSharePercent((forecastValidation.overallPrecision || 0) / 100)}
+                                            </div>
+                                            <div style={{ fontSize: '0.76rem', color: 'var(--text-light)' }}>
+                                                MAPE atual: {formatSharePercent((forecastValidation.overallMape || 0) / 100)}. Status: {forecastValidation.status.badge}.
+                                            </div>
+                                        </div>
+                                        <div style={{ padding: '10px 12px', borderRadius: '12px', background: forecastValidation.recalibration.shouldRecalibrate ? 'rgba(244, 67, 54, 0.08)' : 'rgba(76, 175, 80, 0.08)' }}>
+                                            <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: '4px' }}>
+                                                {forecastValidation.recalibration.shouldRecalibrate ? 'Recalibração semanal ativa' : 'Pesos dentro da faixa de controle'}
+                                            </div>
+                                            <div style={{ fontSize: '0.76rem', color: 'var(--text-light)' }}>
+                                                {forecastValidation.recalibration.reason || 'Sem necessidade de ajuste adicional nesta semana.'}
+                                            </div>
+                                            <div style={{ fontSize: '0.74rem', color: 'var(--text-light)', marginTop: '6px' }}>
+                                                Última revisão: {forecastModelConfig.lastRecalibratedAt || 'Ainda não registrada'}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleResetForecastWeights}
+                                                style={{
+                                                    marginTop: '10px',
+                                                    border: 'none',
+                                                    borderRadius: '999px',
+                                                    padding: '8px 12px',
+                                                    background: 'rgba(26, 35, 126, 0.12)',
+                                                    color: 'var(--primary-blue)',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                Restaurar pesos base
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ ...RESPONSIVE_CARD_GRID, marginBottom: '16px' }}>
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(8, 19, 31, 0.72)', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
+                                    <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '10px' }}>
+                                        Camada 1: pesos da previsão total
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '6px' }}>
+                                        {DAILY_FORECAST_FIELDS.map((field) => (
+                                            <div key={field} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '0.8rem' }}>
+                                                <span>{FORECAST_SIGNAL_LABELS[field]}</span>
+                                                <strong>{formatSharePercent(currentMonthInsight.algorithmWeights?.[field] || 0)}</strong>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div style={{ padding: '14px', borderRadius: '16px', background: 'rgba(8, 19, 31, 0.72)', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
+                                    <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '10px' }}>
+                                        Camada 2: pesos por categoria
+                                    </div>
+                                    <div style={{ display: 'grid', gap: '6px' }}>
+                                        {CATEGORY_FORECAST_FIELDS.map((field) => (
+                                            <div key={field} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '0.8rem' }}>
+                                                <span>{FORECAST_SIGNAL_LABELS[field]}</span>
+                                                <strong>{formatSharePercent(currentMonthInsight.categoryAlgorithmWeights?.[field] || 0)}</strong>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ marginTop: '15px', padding: '12px', borderRadius: '12px', background: 'rgba(8, 19, 31, 0.72)', borderLeft: '4px solid var(--secondary-cyan)', fontSize: '0.78rem', color: 'var(--text-light)', fontStyle: 'italic' }}>
+                                O motor diário agora combina médias de 7 e 30 dias, tendência, padrão semanal, posição no mês, recorrência e fator recente limitado entre 0,75x e 1,25x, com autoajuste semanal pelos erros reais observados.
                             </div>
                         </div>
 
@@ -1406,7 +2053,7 @@ const Dashboard = () => {
                                             style={{
                                                 padding: '10px 12px',
                                                 borderRadius: '12px',
-                                                background: 'rgba(255, 255, 255, 0.68)',
+                                                background: 'rgba(8, 19, 31, 0.68)',
                                                 border: '1px solid rgba(148, 163, 184, 0.16)',
                                                 fontSize: '0.79rem',
                                                 lineHeight: 1.45
@@ -1431,14 +2078,14 @@ const Dashboard = () => {
                                 </div>
 
                                 <div style={{ ...RESPONSIVE_SUMMARY_GRID, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', marginBottom: '12px' }}>
-                                    <div style={{ padding: '12px', borderRadius: '14px', background: 'rgba(255, 255, 255, 0.7)' }}>
+                                    <div style={{ padding: '12px', borderRadius: '14px', background: 'rgba(8, 19, 31, 0.68)' }}>
                                         <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginBottom: '4px' }}>Manuais</div>
                                         <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{currentMonthInsight.manualReceiptsCount}</div>
                                         <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', marginTop: '4px' }}>
                                             {formatCurrencyValue(currentMonthInsight.manualSpent)}
                                         </div>
                                     </div>
-                                    <div style={{ padding: '12px', borderRadius: '14px', background: 'rgba(255, 255, 255, 0.7)' }}>
+                                    <div style={{ padding: '12px', borderRadius: '14px', background: 'rgba(8, 19, 31, 0.68)' }}>
                                         <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginBottom: '4px' }}>Importados</div>
                                         <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{currentMonthInsight.importedReceiptsCount}</div>
                                         <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', marginTop: '4px' }}>
@@ -1448,16 +2095,16 @@ const Dashboard = () => {
                                 </div>
 
                                 <div style={{ display: 'grid', gap: '8px', fontSize: '0.8rem' }}>
-                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.68)' }}>
+                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(8, 19, 31, 0.68)' }}>
                                         <strong>Categoria lider:</strong> {currentMonthInsight.topCategory ? `${currentMonthInsight.topCategory.name} (${formatSharePercent(currentMonthInsight.topCategory.share)})` : 'Sem destaque ainda'}
                                     </div>
-                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.68)' }}>
+                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(8, 19, 31, 0.68)' }}>
                                         <strong>Estabelecimento lider:</strong> {currentMonthInsight.topStore ? `${currentMonthInsight.topStore.name} (${formatSharePercent(currentMonthInsight.topStore.share)})` : 'Sem destaque ainda'}
                                     </div>
-                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.68)' }}>
+                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(8, 19, 31, 0.68)' }}>
                                         <strong>Forma dominante:</strong> {currentMonthInsight.dominantPaymentMethod ? `${currentMonthInsight.dominantPaymentMethod.name} (${formatSharePercent(currentMonthInsight.dominantPaymentMethod.share)})` : 'Nao informada'}
                                     </div>
-                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.68)' }}>
+                                    <div style={{ padding: '10px 12px', borderRadius: '12px', background: 'rgba(8, 19, 31, 0.68)' }}>
                                         <strong>Frequencia:</strong> compras em {currentMonthInsight.activeDays} dos {currentMonthInsight.daysElapsed} dias corridos, com media de {formatCurrencyValue(currentMonthInsight.activeDayAverage)} por dia com gasto.
                                     </div>
                                 </div>
@@ -1549,7 +2196,7 @@ const Dashboard = () => {
                             padding: '10px 12px',
                             borderRadius: '14px',
                             border: '1px solid rgba(148, 163, 184, 0.22)',
-                            background: 'rgba(255, 255, 255, 0.72)'
+                            background: 'rgba(8, 19, 31, 0.72)'
                         }}
                     >
                         <span style={{ fontSize: '0.72rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -1566,7 +2213,7 @@ const Dashboard = () => {
                                 border: 'none',
                                 outline: 'none',
                                 background: 'transparent',
-                                color: 'var(--text-dark)',
+                                color: 'var(--text-main)',
                                 fontSize: '0.92rem',
                                 fontWeight: 600
                             }}
@@ -1580,7 +2227,7 @@ const Dashboard = () => {
                             padding: '10px 12px',
                             borderRadius: '14px',
                             border: '1px solid rgba(148, 163, 184, 0.22)',
-                            background: 'rgba(255, 255, 255, 0.72)'
+                            background: 'rgba(8, 19, 31, 0.72)'
                         }}
                     >
                         <span style={{ fontSize: '0.72rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -1597,7 +2244,7 @@ const Dashboard = () => {
                                 border: 'none',
                                 outline: 'none',
                                 background: 'transparent',
-                                color: 'var(--text-dark)',
+                                color: 'var(--text-main)',
                                 fontSize: '0.92rem',
                                 fontWeight: 600
                             }}
@@ -1650,7 +2297,7 @@ const Dashboard = () => {
                                     borderRadius: '10px',
                                     border: '1px solid #ddd',
                                     fontSize: '0.9rem',
-                                    background: 'white'
+                                    background: 'rgba(8, 19, 31, 0.72)'
                                 }}
                                 type="text"
                                 placeholder="Busque e selecione um ou mais produtos..."
@@ -1664,11 +2311,12 @@ const Dashboard = () => {
                     </div>
                     <div
                         className="glass-card"
+                        ref={productOptionsListRef}
                         style={{
                             marginBottom: '15px',
                             maxHeight: 'clamp(120px, 22vh, 160px)',
                             overflowY: 'auto',
-                            padding: '8px',
+                            padding: '10px',
                             textAlign: 'left'
                         }}
                     >
@@ -1678,26 +2326,58 @@ const Dashboard = () => {
                                     key={option.id}
                                     style={{
                                         display: 'flex',
-                                        alignItems: 'flex-start',
-                                        gap: '8px',
-                                        padding: '6px 4px',
+                                        alignItems: 'center',
+                                        gap: '12px',
+                                        padding: '11px 12px',
                                         cursor: 'pointer',
-                                        fontSize: '0.85rem'
+                                        fontSize: '0.85rem',
+                                        borderRadius: '14px',
+                                        border: selectedProductGroupIds.includes(option.id)
+                                            ? '1px solid rgba(56, 189, 248, 0.38)'
+                                            : '1px solid rgba(148, 163, 184, 0.18)',
+                                        background: selectedProductGroupIds.includes(option.id)
+                                            ? 'rgba(13, 38, 58, 0.92)'
+                                            : 'rgba(8, 19, 31, 0.56)',
+                                        boxShadow: '0 10px 24px rgba(2, 6, 23, 0.16)',
+                                        marginBottom: '8px'
                                     }}
                                 >
                                     <input
                                         type="checkbox"
                                         checked={selectedProductGroupIds.includes(option.id)}
                                         onChange={() => toggleProductSelection(option.id)}
-                                        style={{ marginTop: '3px' }}
+                                        style={{
+                                            margin: 0,
+                                            width: '16px',
+                                            height: '16px',
+                                            flexShrink: 0,
+                                            accentColor: 'var(--primary-blue)'
+                                        }}
                                     />
-                                    <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                        <span>{option.displayName}</span>
-                                        {option.merged && (
-                                            <span style={{ color: 'var(--text-light)', fontSize: '0.72rem' }}>
-                                                {option.memberNames.join(' | ')}
+                                    <span style={{ display: 'flex', flexDirection: 'column', gap: '5px', minWidth: 0, flex: 1 }}>
+                                        <span style={{ fontWeight: 600, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+                                            {option.displayName}
+                                        </span>
+                                        <span style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 8px', alignItems: 'center', minWidth: 0 }}>
+                                            {option.merged && (
+                                                <span style={{ color: 'var(--text-light)', fontSize: '0.72rem', overflowWrap: 'anywhere' }}>
+                                                    {option.memberNames.join(' | ')}
+                                                </span>
+                                            )}
+                                            <span
+                                                style={{
+                                                    borderRadius: '999px',
+                                                    padding: '3px 8px',
+                                                    background: 'rgba(148, 163, 184, 0.12)',
+                                                    color: 'var(--text-light)',
+                                                    fontSize: '0.68rem',
+                                                    lineHeight: 1.2,
+                                                    whiteSpace: 'nowrap'
+                                                }}
+                                            >
+                                                {option.occurrences} registro{option.occurrences === 1 ? '' : 's'}
                                             </span>
-                                        )}
+                                        </span>
                                     </span>
                                 </label>
                             ))
@@ -1866,10 +2546,15 @@ const Dashboard = () => {
                         <div style={{ padding: '16px', background: 'rgba(26, 35, 126, 0.04)', borderRadius: '12px', borderLeft: '4px solid var(--primary-blue)' }}>
                             <h4 style={{ margin: '0 0 8px', fontSize: '0.95rem', color: 'var(--primary-blue)' }}>Entendendo o Gráfico de Pareto</h4>
                             <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.6 }}>
-                                O gráfico acima lista os produtos com maior impacto financeiro em ordem decrescente de valor. A linha amarela mostra o percentual que se forma quando somamos esses gastos na sequência. No seu caso atual, apenas estes {stats.paretoData.length} itens do gráfico consumiram juntos <strong>{formatCurrencyValue(stats.paretoData.reduce((acc, curr) => acc + curr.value, 0))}</strong>. Ou seja, isoladamente eles equivalem a <strong>{((stats.paretoData.reduce((acc, curr) => acc + curr.value, 0) / Math.max(1, stats.totalSpent)) * 100).toFixed(1)}%</strong> de todo o dinheiro (R$ {stats.totalSpent.toFixed(2)}) investido no período. 
+                                O gráfico acima lista os produtos com maior impacto financeiro em ordem decrescente de valor. A linha amarela mostra o percentual que se forma quando somamos esses gastos na sequência. No seu caso atual, apenas estes {stats.paretoData.length} itens do gráfico consumiram juntos <strong>{formatCurrencyValue(stats.paretoData.reduce((acc, curr) => acc + curr.value, 0))}</strong>. Ou seja, isoladamente eles equivalem a <strong>{((stats.paretoData.reduce((acc, curr) => acc + curr.value, 0) / Math.max(1, stats.productTotalSpent || stats.totalSpent)) * 100).toFixed(1)}%</strong> de todo o dinheiro detalhado em itens (R$ {(stats.productTotalSpent || stats.totalSpent).toFixed(2)}) no período. 
                                 <br/><br/>
                                 <strong>Insight Prático:</strong> Segundo o economista Vilfredo Pareto, cortar ou baratear apenas os produtos na extremidade esquerda desta minúscula lista causa uma redução de gastos avassaladora em relação a cortar centenas de produtos minúsculos no resto do relatório. O campeão atual responsável por puxar os gastos para cima é o(a) <strong>{stats.paretoData[0].name}</strong>, custando {formatCurrencyValue(stats.paretoData[0].value)}.
                             </p>
+                        </div>
+                    )}
+                    {pixCoverageNotes.productEvolution && (
+                        <div style={{ marginTop: '12px', fontSize: '0.78rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
+                            {pixCoverageNotes.productEvolution}
                         </div>
                     )}
                 </ChartCard>
@@ -2082,21 +2767,169 @@ const Dashboard = () => {
                 </div>
 
                 </CardCarouselItem><CardCarouselItem index={12} currentIndex={currentCardIndex}>{/* 12. Mapa de Calor */}
-                <ChartCard title="Mapa de Calor (Dias da Semana)" icon={Thermometer} fullWidth>
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={stats.heatmapData}>
-                            <XAxis dataKey="name" axisLine={false} tickLine={false} />
-                            <Tooltip />
-                            <Bar dataKey="value" radius={20}>
-                                {stats.heatmapData.map((entry, index) => (
-                                    <Cell
-                                        key={index}
-                                        fill={entry.value > 5 ? '#E91E63' : entry.value > 2 ? '#FF9800' : '#00E5FF'}
+                <ChartCard title="Mapa de Calor (Dias da Semana)" icon={Thermometer} fullWidth contentHeight={LARGE_CHART_HEIGHT}>
+                    <div style={{ display: 'grid', gap: '18px' }}>
+                        <div style={RESPONSIVE_SUMMARY_GRID}>
+                            <div style={{ padding: '16px', borderRadius: '16px', background: 'rgba(8, 19, 31, 0.74)', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginBottom: '6px' }}>Dia com mais compras</div>
+                                <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>
+                                    {stats.dominantWeekday?.fullLabel || 'Sem dados'}
+                                </div>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-light)', marginTop: '6px' }}>
+                                    {stats.dominantWeekday?.value || 0} compra{stats.dominantWeekday?.value === 1 ? '' : 's'} no periodo filtrado.
+                                </div>
+                            </div>
+                            <div style={{ padding: '16px', borderRadius: '16px', background: 'rgba(8, 19, 31, 0.74)', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginBottom: '6px' }}>Maior intensidade</div>
+                                <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>
+                                    {stats.maxWeekdayPurchaseCount || 0} registro{stats.maxWeekdayPurchaseCount === 1 ? '' : 's'}
+                                </div>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-light)', marginTop: '6px' }}>
+                                    O grafico passa a destacar automaticamente o pico real de recorrencia.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ height: 260, width: '100%' }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={stats.heatmapData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.16)" />
+                                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                                    <YAxis allowDecimals={false} axisLine={false} tickLine={false} />
+                                    <Tooltip
+                                        formatter={(value, _name, payload) => {
+                                            if (!payload?.payload) {
+                                                return [value, 'Compras'];
+                                            }
+
+                                            return [
+                                                `${value} compra${value === 1 ? '' : 's'}`,
+                                                payload.payload.fullLabel
+                                            ];
+                                        }}
+                                        labelFormatter={(_label, payload = []) => payload[0]?.payload?.fullLabel || 'Dia da semana'}
+                                        contentStyle={{
+                                            background: 'rgba(8, 19, 31, 0.96)',
+                                            border: '1px solid rgba(148, 163, 184, 0.18)',
+                                            borderRadius: '14px',
+                                            color: 'var(--text-main)'
+                                        }}
                                     />
-                                ))}
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
+                                    <Bar dataKey="value" radius={[16, 16, 0, 0]}>
+                                        {stats.heatmapData.map((entry, index) => (
+                                            <Cell
+                                                key={index}
+                                                fill={getHeatmapBarColor(entry.value, stats.maxWeekdayPurchaseCount)}
+                                            />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        <div style={{ ...RESPONSIVE_CARD_GRID, gap: '16px' }}>
+                            {stats.weekdayProductInsights.map((day) => (
+                                <div
+                                    key={day.name}
+                                    style={{
+                                        padding: '16px',
+                                        borderRadius: '18px',
+                                        background: day.value === stats.maxWeekdayPurchaseCount && day.value > 0
+                                            ? 'linear-gradient(180deg, rgba(34, 197, 94, 0.16), rgba(8, 19, 31, 0.82))'
+                                            : 'rgba(8, 19, 31, 0.74)',
+                                        border: day.value === stats.maxWeekdayPurchaseCount && day.value > 0
+                                            ? '1px solid rgba(34, 197, 94, 0.35)'
+                                            : '1px solid rgba(148, 163, 184, 0.16)',
+                                        display: 'grid',
+                                        gap: '12px',
+                                        alignContent: 'start'
+                                    }}
+                                >
+                                    <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                                            <strong style={{ fontSize: '1rem' }}>{day.fullLabel}</strong>
+                                            <span style={{ fontSize: '0.78rem', color: day.value === stats.maxWeekdayPurchaseCount && day.value > 0 ? '#86EFAC' : 'var(--text-light)' }}>
+                                                {day.value} compra{day.value === 1 ? '' : 's'}
+                                            </span>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+                                            <span style={{ padding: '5px 9px', borderRadius: '999px', background: 'rgba(148, 163, 184, 0.12)', fontSize: '0.72rem', color: 'var(--text-light)' }}>
+                                                Ticket medio {formatCurrencyValue(day.averageTicket)}
+                                            </span>
+                                            <span style={{ padding: '5px 9px', borderRadius: '999px', background: 'rgba(148, 163, 184, 0.12)', fontSize: '0.72rem', color: 'var(--text-light)' }}>
+                                                {day.uniqueProducts} produto{day.uniqueProducts === 1 ? '' : 's'}
+                                            </span>
+                                            <span style={{ padding: '5px 9px', borderRadius: '999px', background: 'rgba(34, 197, 94, 0.12)', fontSize: '0.72rem', color: '#86EFAC' }}>
+                                                {day.cheapestProductCount} menor{day.cheapestProductCount === 1 ? '' : 'es'} preco{day.cheapestProductCount === 1 ? '' : 's'}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                                            Produtos adquiridos
+                                        </div>
+                                        {day.topProducts.length > 0 ? (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                                {day.topProducts.map((product) => (
+                                                    <div
+                                                        key={`${day.name}-${product.id}`}
+                                                        style={{
+                                                            padding: '8px 10px',
+                                                            borderRadius: '12px',
+                                                            background: 'rgba(15, 23, 42, 0.76)',
+                                                            border: '1px solid rgba(148, 163, 184, 0.12)',
+                                                            minWidth: 0
+                                                        }}
+                                                    >
+                                                        <div style={{ fontSize: '0.8rem', fontWeight: 600, overflowWrap: 'anywhere' }}>{product.displayName}</div>
+                                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginTop: '4px' }}>
+                                                            {product.occurrences}x • media {formatCurrencyValue(product.averageUnitPrice)}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div style={{ fontSize: '0.82rem', color: 'var(--text-light)' }}>
+                                                Nenhum produto detalhado foi encontrado para este dia.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                                            Menor preco observado neste dia
+                                        </div>
+                                        {day.cheapestProducts.length > 0 ? (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                                {day.cheapestProducts.map((product) => (
+                                                    <div
+                                                        key={`${day.name}-${product.id}-cheap`}
+                                                        style={{
+                                                            padding: '8px 10px',
+                                                            borderRadius: '12px',
+                                                            background: 'rgba(34, 197, 94, 0.12)',
+                                                            border: '1px solid rgba(34, 197, 94, 0.24)',
+                                                            minWidth: 0
+                                                        }}
+                                                    >
+                                                        <div style={{ fontSize: '0.8rem', fontWeight: 600, overflowWrap: 'anywhere' }}>{product.displayName}</div>
+                                                        <div style={{ fontSize: '0.72rem', color: '#86EFAC', marginTop: '4px' }}>
+                                                            menor {formatCurrencyValue(product.lowestUnitPrice)} | media {formatCurrencyValue(product.averageUnitPrice)}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div style={{ fontSize: '0.82rem', color: 'var(--text-light)' }}>
+                                                Nenhum produto teve o menor preco observado neste dia.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </ChartCard>
 
                 </CardCarouselItem><CardCarouselItem index={13} currentIndex={currentCardIndex}>{/* 13. Índice de Inflação Pessoal */}
@@ -2234,6 +3067,11 @@ const Dashboard = () => {
                             Ainda nao ha produtos com pelo menos dois registros de preco em datas diferentes dentro do intervalo selecionado. Ajuste o periodo para calcular a inflacao pessoal.
                         </div>
                     )}
+                    {pixCoverageNotes.inflation && (
+                        <div style={{ marginTop: '14px', fontSize: '0.78rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
+                            {pixCoverageNotes.inflation}
+                        </div>
+                    )}
                 </div>
 
                 </CardCarouselItem><CardCarouselItem index={14} currentIndex={currentCardIndex}>{/* 14. Top 5 produtos recorrentes */}
@@ -2283,7 +3121,7 @@ const Dashboard = () => {
                     >
                         <ChevronLeft size={28} />
                     </button>
-                    <div style={{ background: 'rgba(255, 255, 255, 0.95)', padding: '8px 20px', borderRadius: '25px', fontSize: '0.9rem', fontWeight: 800, color: 'var(--primary-blue)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', border: '1px solid rgba(26, 35, 126, 0.1)' }}>
+                    <div style={{ background: 'rgba(8, 19, 31, 0.92)', padding: '8px 20px', borderRadius: '25px', fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', border: '1px solid rgba(148, 163, 184, 0.16)' }}>
                         {currentCardIndex + 1} / 16
                     </div>
                     <button 

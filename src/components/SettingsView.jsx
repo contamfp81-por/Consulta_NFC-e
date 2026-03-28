@@ -4,7 +4,7 @@ import { db } from '../db';
 import { Trash2, Plus, Info } from 'lucide-react';
 import { buildProductGrouping, createProductAliasPair } from '../utils/productGrouping';
 
-const Settings = ({ onNavigate }) => {
+const Settings = () => {
     const categoriesQuery = useLiveQuery(() => db.categories.toArray());
     const productsQuery = useLiveQuery(() => db.products.toArray());
     const productAliasesQuery = useLiveQuery(() => db.productAliases.toArray());
@@ -104,12 +104,12 @@ const Settings = ({ onNavigate }) => {
                     Gerenciar Categorias
                 </h3>
 
-                <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
                     <input
                         type="text"
                         placeholder="Nova categoria..."
                         className="glass-card"
-                        style={{ flex: 1, padding: '12px', margin: 0, borderRadius: '12px', border: '1px solid #ddd' }}
+                        style={{ flex: 1, minWidth: '220px', padding: '12px', margin: 0, borderRadius: '12px', border: '1px solid #ddd' }}
                         value={newCatName}
                         onChange={(event) => setNewCatName(event.target.value)}
                     />

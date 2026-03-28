@@ -108,11 +108,12 @@ const ManualEntryView = ({ onComplete, onCancel, onScan }) => {
 
     return (
         <div className="animate-slide-up">
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '15px' }}>
                 <button
                     className="glass-card"
                     style={{
                         flex: 1,
+                        minWidth: '220px',
                         padding: '15px',
                         display: 'flex',
                         alignItems: 'center',
@@ -213,7 +214,7 @@ const ManualEntryView = ({ onComplete, onCancel, onScan }) => {
                                 onChange={(e) => updateProduct(p.id, 'name', e.target.value)}
                             />
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '10px' }}>
                                 <div>
                                     <label style={{ fontSize: '0.7rem', color: 'var(--text-light)' }}>Qtd</label>
                                     <input
@@ -238,7 +239,7 @@ const ManualEntryView = ({ onComplete, onCancel, onScan }) => {
                                 </div>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
                                 <div>
                                     <label style={{ fontSize: '0.7rem', color: 'var(--text-light)' }}>Unidade (UN, KG...)</label>
                                     <input
@@ -272,12 +273,12 @@ const ManualEntryView = ({ onComplete, onCancel, onScan }) => {
                 </div>
             </div>
 
-            <div className="glass-card" style={{ background: 'var(--primary-blue)', color: 'white', position: 'sticky', bottom: '100px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 }}>
+            <div className="glass-card" style={{ background: 'var(--primary-blue)', color: 'white', position: 'sticky', bottom: '100px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px', zIndex: 10 }}>
                 <div>
                     <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>Total Geral</span>
                     <h2 style={{ margin: 0, color: 'white' }}>R$ {calculateTotal().toFixed(2)}</h2>
                 </div>
-                <button className="btn-primary" style={{ background: 'white', color: 'var(--primary-blue)', width: 'auto', padding: '12px 25px' }} onClick={handleSave}>
+                <button className="btn-primary" style={{ background: 'white', color: 'var(--primary-blue)', width: 'auto', minWidth: '160px', padding: '12px 25px' }} onClick={handleSave}>
                     <Save size={20} /> Salvar
                 </button>
             </div>
