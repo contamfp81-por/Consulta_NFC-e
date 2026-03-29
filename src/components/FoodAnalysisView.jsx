@@ -42,16 +42,37 @@ const resolveToneClass = (direction) => {
 
 const formatPercentValue = (value) => `${Number(value || 0).toFixed(1)}%`;
 
-const FoodAnalysisView = () => {
-    const receipts = useLiveQuery(() => db.receipts.toArray()) || [];
-    const products = useLiveQuery(() => db.products.toArray()) || [];
+const FoodAnalysisView = ({ dateFilter = {} }) => {
+    const receiptsQuery = useLiveQuery(() => db.receipts.toArray()) || [];
+    const productsQuery = useLiveQuery(() => db.products.toArray()) || [];
     const productAliases = useLiveQuery(() => db.productAliases.toArray()) || [];
     const foodClassificationOverrides = useLiveQuery(() => db.foodClassificationOverrides.toArray()) || [];
     const [savingReviewKey, setSavingReviewKey] = useState('');
 
+    const { startDate, endDate } = dateFilter;
+
+    const filteredReceipts = useMemo(() => {
+        return receiptsQuery.filter((receipt) => {
+            if (!receipt.date) return false;
+            const rDate = new Date(receipt.date);
+            if (Number.isNaN(rDate.getTime())) return false;
+            const dateStr = rDate.toISOString().split('T')[0];
+            
+            if (startDate && dateStr < startDate) return false;
+            if (endDate && dateStr > endDate) return false;
+            return true;
+        });
+    }, [endDate, receiptsQuery, startDate]);
+
+    const filteredReceiptIds = useMemo(() => new Set(filteredReceipts.map(r => r.id)), [filteredReceipts]);
+
+    const filteredProducts = useMemo(() => {
+        return productsQuery.filter(p => filteredReceiptIds.has(p.receiptId));
+    }, [filteredReceiptIds, productsQuery]);
+
     const analysis = useMemo(
-        () => analyzeFoodPurchases({ receipts, products, productAliases, foodClassificationOverrides }),
-        [foodClassificationOverrides, productAliases, products, receipts]
+        () => analyzeFoodPurchases({ receipts: filteredReceipts, products: filteredProducts, productAliases, foodClassificationOverrides }),
+        [foodClassificationOverrides, productAliases, filteredProducts, filteredReceipts]
     );
 
     const qualityBreakdown = analysis.totals.totalSpendByLevel.filter((item) => item.value > 0);

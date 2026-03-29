@@ -317,7 +317,7 @@ const ChartCard = ({ title, icon, children, fullWidth = false, contentHeight = D
     );
 };
 
-const Dashboard = ({ onOpenForecastPrecision }) => {
+const Dashboard = ({ onOpenForecastPrecision, dateFilter = {} }) => {
     const [currentCardIndex, setCurrentCardIndex] = useState(0);
     const [selectedCategory, setSelectedCategory] = useState(null);
     const receiptsQuery = useLiveQuery(() => db.receipts.toArray());
@@ -329,8 +329,7 @@ const Dashboard = ({ onOpenForecastPrecision }) => {
     const [productSearchTerm, setProductSearchTerm] = useState('');
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
     const [reportFeedback, setReportFeedback] = useState('');
-    const [startDateFilter, setStartDateFilter] = useState('');
-    const [endDateFilter, setEndDateFilter] = useState('');
+    const { startDate: startDateFilter, endDate: endDateFilter } = dateFilter;
     const forecastPersistenceSignatureRef = useRef('');
     const productOptionsListRef = useRef(null);
     const shouldRestoreProductListScrollRef = useRef(false);
@@ -402,25 +401,6 @@ const Dashboard = ({ onOpenForecastPrecision }) => {
         [productAliases, products]
     );
 
-    const dateBounds = useMemo(() => {
-        const validDates = receipts
-            .map((receipt) => getDateKey(receipt.date))
-            .filter(Boolean)
-            .sort((left, right) => left.localeCompare(right));
-
-        return {
-            min: validDates[0] || '',
-            max: validDates[validDates.length - 1] || ''
-        };
-    }, [receipts]);
-
-    useEffect(() => {
-        if (!dateBounds.min || !dateBounds.max) return;
-
-        setStartDateFilter((currentValue) => (currentValue ? currentValue : dateBounds.min));
-        setEndDateFilter((currentValue) => (currentValue ? currentValue : dateBounds.max));
-    }, [dateBounds.max, dateBounds.min]);
-
     useEffect(() => {
         if (forecastModelConfigQuery) {
             return;
@@ -433,19 +413,15 @@ const Dashboard = ({ onOpenForecastPrecision }) => {
     }, [forecastModelConfigQuery]);
 
     const normalizedDateRange = useMemo(() => {
-        if (!dateBounds.min || !dateBounds.max) {
-            return { start: '', end: '' };
-        }
+        let start = startDateFilter || '';
+        let end = endDateFilter || '';
 
-        let start = startDateFilter || dateBounds.min;
-        let end = endDateFilter || dateBounds.max;
-
-        if (start > end) {
+        if (start && end && start > end) {
             [start, end] = [end, start];
         }
 
         return { start, end };
-    }, [dateBounds.max, dateBounds.min, endDateFilter, startDateFilter]);
+    }, [endDateFilter, startDateFilter]);
 
     useEffect(() => {
         setReportFeedback('');
@@ -1637,10 +1613,6 @@ const Dashboard = ({ onOpenForecastPrecision }) => {
     const selectedPeriodLabel = normalizedDateRange.start && normalizedDateRange.end
         ? `${formatFilterDateLabel(normalizedDateRange.start)} até ${formatFilterDateLabel(normalizedDateRange.end)}`
         : 'Período completo';
-    const _availablePeriodLabel = dateBounds.min && dateBounds.max
-        ? `${formatFilterDateLabel(dateBounds.min)} atÃ© ${formatFilterDateLabel(dateBounds.max)}`
-        : 'Sem intervalo disponivel';
-    const isFullPeriodSelected = normalizedDateRange.start === dateBounds.min && normalizedDateRange.end === dateBounds.max;
     const averageTicketValue = hasFilteredResults
         ? stats.totalSpent / Math.max(1, filteredReceipts.length)
         : 0;
@@ -2174,110 +2146,6 @@ const Dashboard = ({ onOpenForecastPrecision }) => {
                 </div>
             </div>
             )}
-
-            <div className="glass-card" style={{ marginBottom: '25px', padding: '18px' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '14px' }}>
-                    <div style={{ padding: '8px', background: 'rgba(26, 35, 126, 0.1)', borderRadius: '10px', color: 'var(--primary-blue)' }}>
-                        <Calendar size={18} />
-                    </div>
-                    <div>
-                        <h4 style={{ margin: 0, fontSize: '0.95rem' }}>Intervalo de Datas</h4>
-                        <p style={{ margin: '4px 0 0', color: 'var(--text-light)', fontSize: '0.8rem', lineHeight: 1.4 }}>
-                            Filtro global para todas as funcionalidades do dashboard.
-                        </p>
-                    </div>
-                </div>
-                <div style={RESPONSIVE_FILTER_GRID}>
-                    <label
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '4px',
-                            padding: '10px 12px',
-                            borderRadius: '14px',
-                            border: '1px solid rgba(148, 163, 184, 0.22)',
-                            background: 'rgba(8, 19, 31, 0.72)'
-                        }}
-                    >
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            De
-                        </span>
-                        <input
-                            type="date"
-                            value={startDateFilter}
-                            min={dateBounds.min || undefined}
-                            max={dateBounds.max || undefined}
-                            onChange={(event) => setStartDateFilter(event.target.value)}
-                            style={{
-                                padding: 0,
-                                border: 'none',
-                                outline: 'none',
-                                background: 'transparent',
-                                color: 'var(--text-main)',
-                                fontSize: '0.92rem',
-                                fontWeight: 600
-                            }}
-                        />
-                    </label>
-                    <label
-                        style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '4px',
-                            padding: '10px 12px',
-                            borderRadius: '14px',
-                            border: '1px solid rgba(148, 163, 184, 0.22)',
-                            background: 'rgba(8, 19, 31, 0.72)'
-                        }}
-                    >
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            Ate
-                        </span>
-                        <input
-                            type="date"
-                            value={endDateFilter}
-                            min={dateBounds.min || undefined}
-                            max={dateBounds.max || undefined}
-                            onChange={(event) => setEndDateFilter(event.target.value)}
-                            style={{
-                                padding: 0,
-                                border: 'none',
-                                outline: 'none',
-                                background: 'transparent',
-                                color: 'var(--text-main)',
-                                fontSize: '0.92rem',
-                                fontWeight: 600
-                            }}
-                        />
-                    </label>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setStartDateFilter(dateBounds.min);
-                            setEndDateFilter(dateBounds.max);
-                        }}
-                        disabled={!dateBounds.min || !dateBounds.max || isFullPeriodSelected}
-                        style={{
-                            border: '1px solid rgba(26, 35, 126, 0.14)',
-                            background: isFullPeriodSelected ? 'rgba(148, 163, 184, 0.14)' : 'rgba(26, 35, 126, 0.06)',
-                            color: isFullPeriodSelected ? 'var(--text-light)' : 'var(--primary-blue)',
-                            borderRadius: '999px',
-                            padding: '8px 12px',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            cursor: isFullPeriodSelected ? 'default' : 'pointer',
-                            justifySelf: 'end',
-                            gridColumn: '1 / -1',
-                            width: 'fit-content'
-                        }}
-                    >
-                        Usar Base Disponível
-                    </button>
-                </div>
-                <div style={{ marginTop: '12px', fontSize: '0.78rem', color: 'var(--text-light)' }}>
-                    O periodo escolhido passa a valer para graficos, comparativos e geracao do PDF.
-                </div>
-            </div>
 
             <CardCarouselItem index={0} currentIndex={currentCardIndex}>{currentMonthProjectionCard}</CardCarouselItem>
 
