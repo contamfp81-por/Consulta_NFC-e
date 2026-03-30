@@ -20,8 +20,17 @@ const normalizeCameraList = (cameras = []) => cameras.map((camera, index) => ({
 }));
 
 const parseCurrencyInput = (value) => {
-    const normalized = String(value || '').replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
-    const parsed = Number(normalized);
+    if (!value) return 0;
+    
+    let normalized = String(value).trim().replace(/[^\d.,-]/g, '');
+    
+    if (normalized.includes(',') && normalized.includes('.')) {
+        normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else if (normalized.includes(',')) {
+        normalized = normalized.replace(',', '.');
+    }
+
+    const parsed = Number.parseFloat(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
 };
 
