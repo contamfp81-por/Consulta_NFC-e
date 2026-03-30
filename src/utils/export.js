@@ -1986,7 +1986,12 @@ const addTableHeader = (pdf, columns, startX, startY) => {
 
     columns.forEach((column) => {
         pdf.rect(currentX, startY, column.width, 24, 'F');
-        pdf.text(column.label, currentX + 6, startY + 16);
+        currentX += column.width;
+    });
+
+    currentX = startX;
+    columns.forEach((column) => {
+        pdf.text(String(column.label || ''), currentX + 6, startY + 16);
         currentX += column.width;
     });
 
@@ -2176,6 +2181,8 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     pdf.setTextColor(COLORS.text);
     pdf.text('RELATÓRIO DE RISCO E PREVISÃO\nAnálise de tendências sob cenários estatísticos.', 40, 122);
     
+    let currentY = 170;
+
     const columns = [
         { label: 'Cenário', width: 100 },
         { label: 'Descrição da Lógica', width: 315 },
@@ -2190,19 +2197,21 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
             { name: 'Se repetir picos', logic: scenarios.picos.description, value: formatCurrency(scenarios.picos.value) }
         ];
         
-        let currentY = addTableHeader(pdf, columns, 40, 170);
+        let tableY = addTableHeader(pdf, columns, 40, currentY);
         rows.forEach(row => {
             if (row.isBold) pdf.setFont('helvetica', 'bold');
             else pdf.setFont('helvetica', 'normal');
-            currentY = addTableRow(pdf, columns, [row.name, row.logic, row.value], 40, currentY);
+            tableY = addTableRow(pdf, columns, [row.name, row.logic, row.value], 40, tableY);
         });
         
         pdf.setFont('helvetica', 'italic');
         pdf.setFontSize(9);
         pdf.setTextColor(COLORS.muted);
-        pdf.text('A análise considera sazonalidade, Run Rate e elasticidade de categorias.', 40, currentY + 20);
+        pdf.text('A análise considera sazonalidade, Run Rate e elasticidade de categorias.', 40, tableY + 20);
+        currentY = tableY + 40;
     } else {
-        pdf.text('Dados de projeção insuficientes para o mês atual.', 40, 180);
+        pdf.text('Dados de projeção insuficientes para o mês atual.', 40, currentY + 10);
+        currentY += 30;
     }
 
     const chartCanvas = drawMultiScenarioProjectionChart({
@@ -2212,16 +2221,19 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
         totalDays: reportData.monthInsight?.totalDaysInMonth || 30
     });
     
-    pdf.addImage(chartCanvas.toDataURL('image/png', 1), 'PNG', 40, 260, 515, 180, undefined, 'FAST');
+    // Assegura espaço adaptável baseado no que a tabela empurrou ou não
+    pdf.addImage(chartCanvas.toDataURL('image/png', 1), 'PNG', 40, currentY, 515, 180, undefined, 'FAST');
 
-    addInsightBlock(pdf, 'Leitura de Risco', insights.projection.comportamento, 40, 460, 515, COLORS.blue);
-    addInsightBlock(pdf, 'Tendência e Ajustes', insights.projection.tendencia, 40, 570, 515, COLORS.cyan);
+    const chartBottomY = currentY + 196;
+
+    addInsightBlock(pdf, 'Leitura de Risco', insights.projection.comportamento, 40, chartBottomY, 515, COLORS.blue);
+    addInsightBlock(pdf, 'Tendência e Ajustes', insights.projection.tendencia, 40, chartBottomY + 140, 515, COLORS.cyan);
     
     addNarrativeCard(
         pdf, 
         'Conclusão da Análise', 
         insights.projection.tendencia + ' ' + (reportData.monthInsight?.outlookSentence || ''), 
-        40, 680, 515, 80, COLORS.navy
+        40, chartBottomY + 280, 515, 80, COLORS.navy
     );
 };
 
@@ -2345,7 +2357,16 @@ export const generateConsumptionAnalysisPdf = async ({
     const narrativeY = 370 + synthesisHeight + 26;
     addNarrativeCard(pdf, 'Concentração do gasto', insights.summary.concentrationNote, 40, narrativeY, 251, 110, COLORS.blue);
     addNarrativeCard(pdf, 'Recorrência diária', insights.summary.recurrenceNote, 304, narrativeY, 251, 110, COLORS.cyan);
-    addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, narrativeY + 124, 515, 96, COLORS.slate);
+    
+    const nextBlockY = narrativeY + 124;
+    // Se o último insight for quebrar a folha A4 no rodapé (limit 800)
+    if (nextBlockY + 96 > 810) {
+        pdf.addPage();
+        addPageHeader(pdf, insights.summary.title, 'Síntese Estratégica - Continuação');
+        addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, 100, 515, 96, COLORS.slate);
+    } else {
+        addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, nextBlockY, 515, 96, COLORS.slate);
+    }
 
     pdf.addPage();
     addProjectionAnalysisPage(pdf, insights.summary.title, reportData, insights);
