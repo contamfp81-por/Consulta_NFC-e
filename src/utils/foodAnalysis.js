@@ -1075,7 +1075,8 @@ const buildAutomaticAlerts = ({ monthTrend, weekTrend, sugarAnalysis, impulsivit
     else if (sugarAnalysis.classification === 'moderado') alerts.push('Os doces representam uma parcela relevante das suas compras.');
     if (behaviorIndicators.nightSugaryShare >= 0.45) alerts.push('Houve aumento de compras de itens açucarados no periodo noturno.');
     if (behaviorIndicators.weekendBadShare >= 0.45) alerts.push('Os fins de semana concentram muitos itens ultraprocessados ou açucarados.');
-    if (impulsivity.classification === 'alto' || impulsivity.totalFlagged >= 2) alerts.push('Ha sinais de compra impulsiva.');
+    if (impulsivity.classification === 'alto') alerts.push('O comportamento recente mostra alta probabilidade de compras por impulso.');
+    else if (impulsivity.totalFlagged >= 2) alerts.push('Cuidado com compras esporadicas que elevam o ticket de lanches e doces.');
     if (impulsivity.nighttimePattern) alerts.push('Voce costuma comprar junk food a noite.');
     if (impulsivity.saturdayPattern) alerts.push('Ha padrao de compra impulsiva aos sabados.');
     if (pendingReviewCount > 0) alerts.push(`Ha ${pendingReviewCount} item(ns) aguardando classificacao manual na analise alimentar.`);
