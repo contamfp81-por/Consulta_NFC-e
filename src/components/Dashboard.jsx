@@ -43,13 +43,12 @@ const WEEKDAY_OPTIONS = [
 ];
 
 const getHeatmapBarColor = (value, maxValue) => {
-    if (!maxValue || value <= 0) return 'rgba(71, 85, 105, 0.45)';
+    if (!maxValue || value <= 0) return 'rgba(148, 163, 184, 0.16)';
 
     const ratio = value / maxValue;
-    if (ratio >= 0.85) return '#22C55E';
-    if (ratio >= 0.55) return '#38BDF8';
-    if (ratio >= 0.3) return '#818CF8';
-    return '#475569';
+    // Escala de HSL: 200 (azul frio) para 0 (vermelho quente)
+    const hue = Math.round(200 - (ratio * 200));
+    return `hsl(${hue}, 85%, 55%)`;
 };
 
 const getDateKey = (value) => {

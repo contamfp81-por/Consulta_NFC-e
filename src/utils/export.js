@@ -1753,7 +1753,9 @@ const drawCompositionChart = (categoryComposition) => drawDonutChart({
 });
 
 const drawFlowChart = (flowData) => {
-    const { canvas, context } = createCanvas(1400, 560);
+    const maxNodes = Math.max(flowData.sources.length, flowData.targets.length);
+    const dynamicHeight = Math.max(560, 200 + maxNodes * 45);
+    const { canvas, context } = createCanvas(1400, dynamicHeight);
     if (!flowData.links.length || !flowData.sources.length || !flowData.targets.length) {
         drawEmptyState(
             context,
@@ -2227,13 +2229,13 @@ const addProjectionAnalysisPage = (pdf, reportTitle, reportData, insights) => {
     const chartBottomY = currentY + 196;
 
     addInsightBlock(pdf, 'Leitura de Risco', insights.projection.comportamento, 40, chartBottomY, 515, COLORS.blue);
-    addInsightBlock(pdf, 'Tendência e Ajustes', insights.projection.tendencia, 40, chartBottomY + 140, 515, COLORS.cyan);
+    addInsightBlock(pdf, 'Tendência e Ajustes', insights.projection.tendencia, 40, chartBottomY + 115, 515, COLORS.cyan);
     
     addNarrativeCard(
         pdf, 
         'Conclusão da Análise', 
         insights.projection.tendencia + ' ' + (reportData.monthInsight?.outlookSentence || ''), 
-        40, chartBottomY + 280, 515, 80, COLORS.navy
+        40, chartBottomY + 230, 515, 70, COLORS.navy
     );
 };
 
@@ -2329,14 +2331,16 @@ export const generateConsumptionAnalysisPdf = async ({
     pdf.text(`Base de dados: ${receipts.length} cupons fiscais e ${products.length} itens processados`, 40, 148);
 
     const cardWidth = (pageWidth - 100) / 2;
+    const discountGap = reportData.receiptTotalSpent - reportData.productTotalSpent;
+
     [
         ['Total em cupons', formatCurrency(reportData.receiptTotalSpent)],
         ['Total dos itens', formatCurrency(reportData.productTotalSpent)],
-        ['Cupons processados', `${reportData.receipts.length}`],
-        ['Ticket médio', formatCurrency(avgTicket)]
+        ['Descontos / Diferença', formatCurrency(Math.abs(discountGap))],
+        ['Cupons processados', `${reportData.receipts.length}`]
     ].forEach(([label, value], index) => {
         const x = 40 + (index % 2) * (cardWidth + 20);
-        const y = 172 + Math.floor(index / 2) * 92;
+        const y = 172 + Math.floor(index / 2) * 85;
         addSummaryCard(pdf, label, value, x, y, cardWidth);
     });
 
@@ -2345,28 +2349,20 @@ export const generateConsumptionAnalysisPdf = async ({
     const synthesisHeight = Math.max(112, synthesisLines.length * 14 + 56);
     
     pdf.setFillColor(COLORS.page);
-    pdf.roundedRect(40, 370, 515, synthesisHeight, 14, 14, 'F');
+    pdf.roundedRect(40, 350, 515, synthesisHeight, 14, 14, 'F');
     pdf.setTextColor(COLORS.text);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(13);
-    pdf.text('Síntese estratégica', 56, 396);
+    pdf.text('Síntese estratégica', 56, 376);
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
-    pdf.text(synthesisLines, 56, 418);
+    pdf.text(synthesisLines, 56, 398);
 
-    const narrativeY = 370 + synthesisHeight + 26;
-    addNarrativeCard(pdf, 'Concentração do gasto', insights.summary.concentrationNote, 40, narrativeY, 251, 110, COLORS.blue);
-    addNarrativeCard(pdf, 'Recorrência diária', insights.summary.recurrenceNote, 304, narrativeY, 251, 110, COLORS.cyan);
+    const narrativeY = 350 + synthesisHeight + 20;
+    addNarrativeCard(pdf, 'Concentração do gasto', insights.summary.concentrationNote, 40, narrativeY, 251, 100, COLORS.blue);
+    addNarrativeCard(pdf, 'Recorrência diária', insights.summary.recurrenceNote, 304, narrativeY, 251, 100, COLORS.cyan);
     
-    const nextBlockY = narrativeY + 124;
-    // Se o último insight for quebrar a folha A4 no rodapé (limit 800)
-    if (nextBlockY + 96 > 810) {
-        pdf.addPage();
-        addPageHeader(pdf, insights.summary.title, 'Síntese Estratégica - Continuação');
-        addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, 100, 515, 96, COLORS.slate);
-    } else {
-        addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, nextBlockY, 515, 96, COLORS.slate);
-    }
+    addNarrativeCard(pdf, 'Leitura inflacionária', insights.summary.inflationNote, 40, narrativeY + 110, 515, 90, COLORS.slate);
 
     pdf.addPage();
     addProjectionAnalysisPage(pdf, insights.summary.title, reportData, insights);
@@ -2650,9 +2646,11 @@ export const generateConsumptionAnalysisPdf = async ({
                 valueFormatter: (value) => `${value}`,
                 tickFormatter: (value) => `${Math.round(value)}`,
                 labelRotation: 0,
-                barColorAccessor: (item) => (
-                    item.value > 5 ? '#E91E63' : item.value > 2 ? '#FF9800' : '#00E5FF'
-                )
+                barColorAccessor: (item) => {
+                    const ratio = (dominantDay?.value || 1) > 0 ? (item.value / dominantDay.value) : 0;
+                    const hue = Math.round(200 - (ratio * 200));
+                    return `hsl(${hue}, 85%, 55%)`;
+                }
             }),
             insights: insights.heatmap,
             metrics: [
