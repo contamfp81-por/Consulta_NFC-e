@@ -14,7 +14,21 @@ const QR_READER_OPTIONS = {
 
 const DEFAULT_CATEGORY_COLOR = '#607D8B';
 const MACRO_CAMERA_OPTION_ID = '__scanner_macro_camera__';
-const DEFAULT_SCAN_CONFIG = { fps: 12, qrbox: { width: 260, height: 260 } };
+const DEFAULT_SCAN_CONFIG = {
+    fps: 12,
+    qrbox: (viewfinderWidth, viewfinderHeight) => {
+        const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+        const qrboxSize = Math.floor(minEdge * 0.85); // Aumenta a area de leitura para 85%
+        return {
+            width: Math.max(220, qrboxSize),
+            height: Math.max(220, qrboxSize)
+        };
+    },
+    videoConstraints: {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+    }
+};
 
 const createQrCodeReader = (elementId) => new Html5Qrcode(elementId, QR_READER_OPTIONS);
 const normalizeCameraLabelText = (value) => String(value || '')
@@ -115,8 +129,8 @@ const buildPreferredResolutionConstraint = (capabilities = {}) => {
     if (widthMax === null && heightMax === null) return null;
 
     return {
-        width: widthMax !== null ? { ideal: widthMax } : undefined,
-        height: heightMax !== null ? { ideal: heightMax } : undefined
+        width: widthMax !== null ? { ideal: Math.min(widthMax, 2560) } : undefined,
+        height: heightMax !== null ? { ideal: Math.min(heightMax, 1440) } : undefined
     };
 };
 
@@ -148,13 +162,20 @@ const buildMacroConstraintSteps = (capabilities = {}, settings = {}) => {
     const preferredResolution = buildPreferredResolutionConstraint(capabilities);
     const focusConstraintCandidates = buildMacroFocusConstraintCandidates(capabilities, settings);
     const zoomMin = Number.isFinite(capabilities.zoom?.min) ? capabilities.zoom.min : null;
+    const zoomMax = Number.isFinite(capabilities.zoom?.max) ? capabilities.zoom.max : null;
     const currentZoom = Number.isFinite(settings?.zoom) ? settings.zoom : null;
 
     if (preferredResolution) {
         steps.push(preferredResolution);
     }
 
-    if (zoomMin !== null && currentZoom !== zoomMin) {
+    if (zoomMin !== null && zoomMax !== null) {
+        // Applica um zoom moderado (2.3x) para focar melhor em QR codes pequenos nos cupons fiscais
+        const targetZoom = Math.min(zoomMax, Math.max(zoomMin, 2.3));
+        if (currentZoom !== targetZoom) {
+            steps.push({ advanced: [{ zoom: targetZoom }] });
+        }
+    } else if (zoomMin !== null && currentZoom !== zoomMin) {
         steps.push({ advanced: [{ zoom: zoomMin }] });
     }
 
