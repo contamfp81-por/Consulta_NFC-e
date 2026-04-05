@@ -48,64 +48,13 @@ const isFrontFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel ||
 const isRearFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['back', 'rear', 'traseira', 'environment', 'externa', 'principal', 'main']);
 const isMacroNamedCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['macro', 'ultra-wide', 'ultrawide', 'wide-angle', 'wide angle', '0.5x', '0,5x']);
 
-const scoreMacroCameraCandidate = (camera) => {
-    const label = camera?.normalizedLabel || '';
-    let score = 0;
-
-    if (isFrontFacingCamera(camera)) {
-        score -= 100;
-    } else {
-        score += 5; // Assume que qualquer lente não-frontal seja traseira e pontua
-    }
-
-    if (isRearFacingCamera(camera)) score += 35;
-    if (label.includes('macro')) score += 120;
-    if (hasAnyKeyword(label, ['ultra-wide', 'ultrawide', 'wide-angle', 'wide angle', '0.5x', '0,5x'])) score += 70;
-
-    return score;
-};
-
-const scoreRearCameraCandidate = (camera) => {
-    let score = 0;
-
-    if (isFrontFacingCamera(camera)) {
-        score -= 100;
-    } else {
-        score += 10; // Se não for frontal, assume como forte candidata traseira
-    }
-
-    if (isRearFacingCamera(camera)) score += 80;
-    if (isMacroNamedCamera(camera)) score += 20;
-    
-    if (camera?.label?.includes(' 0') || camera?.id?.endsWith('0')) score += 5;
-
-    return score;
-};
-
-const pickBestCamera = (cameras = [], scoreCamera, minimumScore = 1) => {
-    if (!Array.isArray(cameras) || !cameras.length) return null;
-
-    const ranked = [...cameras]
-        .map((camera) => ({ camera, score: scoreCamera(camera) }))
-        .sort((left, right) => right.score - left.score);
-
-    return ranked[0] && ranked[0].score >= minimumScore ? ranked[0].camera : null;
-};
-
-const getBestMacroCamera = (cameras = []) => pickBestCamera(cameras, scoreMacroCameraCandidate);
-const getBestRearCamera = (cameras = []) => pickBestCamera(cameras, scoreRearCameraCandidate);
 const hasDetailedCameraLabels = (cameras = []) => cameras.some((camera) => Boolean(camera?.normalizedLabel));
 
 const buildCameraOptions = (cameras = []) => {
     if (!Array.isArray(cameras) || !cameras.length) return [];
 
-    const macroCamera = getBestMacroCamera(cameras);
-    const macroLabel = macroCamera
-        ? `Camera macro / close-up (${macroCamera.label})`
-        : 'Camera macro / close-up';
-
     return [
-        { id: MACRO_CAMERA_OPTION_ID, label: macroLabel, mode: 'macro' },
+        { id: MACRO_CAMERA_OPTION_ID, label: 'Lente Traseira (Modo Qualidade/Macro Automático)', mode: 'macro' },
         ...cameras.map((camera) => ({
             id: camera.id,
             label: camera.label,
@@ -116,14 +65,11 @@ const buildCameraOptions = (cameras = []) => {
 
 const resolveSelectedCamera = (selectedCameraId, cameras = []) => {
     if (selectedCameraId === MACRO_CAMERA_OPTION_ID) {
-        const macroCandidate = getBestMacroCamera(cameras);
-        const rearCandidate = getBestRearCamera(cameras);
-        const resolvedCamera = macroCandidate || rearCandidate || null;
-
         return {
             mode: 'macro',
-            resolvedCamera,
-            startTarget: resolvedCamera?.id || { facingMode: 'environment' }
+            resolvedCamera: null,
+            // Passa explicitamente o facingMode puro. Android e iOS sempre abrem a lente traseira física com isso.
+            startTarget: { facingMode: 'environment' }
         };
     }
 
@@ -454,31 +400,8 @@ const Scanner = ({ onComplete }) => {
         }
     }, []);
 
-    const unlockCameraLabelsForMacroSelection = useCallback(async () => {
-        if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-            return cameras;
-        }
-
-        let temporaryStream = null;
-        try {
-            temporaryStream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: 'environment' } },
-                audio: false
-            });
-        } catch {
-            return cameras;
-        } finally {
-            temporaryStream?.getTracks?.().forEach((track) => {
-                try {
-                    track.stop();
-                } catch {
-                    // Ignora falhas ao encerrar stream temporaria.
-                }
-            });
-        }
-
-        return loadAvailableCameras(true);
-    }, [cameras, loadAvailableCameras]);
+    // Funcionalidade de lock da macro foi removida por ser instável no Chrome de Androids customizados.
+    const unlockCameraLabelsForMacroSelection = useCallback(async () => cameras, [cameras]);
 
     const ensureCategoryExists = useCallback(async (categoryName) => {
         const name = String(categoryName || '').trim();
@@ -641,17 +564,9 @@ const Scanner = ({ onComplete }) => {
 
         const startScanner = async () => {
             try {
-                let availableCameras = cameras;
-                if (selectedCameraId === MACRO_CAMERA_OPTION_ID) {
-                    const missingMacroDetails = !hasDetailedCameraLabels(availableCameras) || !getBestMacroCamera(availableCameras);
-                    if (missingMacroDetails) {
-                        availableCameras = await unlockCameraLabelsForMacroSelection();
-                    }
-                }
-
                 const scanner = createQrCodeReader('reader');
                 scannerRef.current = scanner;
-                const cameraSelection = resolveSelectedCamera(selectedCameraId, availableCameras);
+                const cameraSelection = resolveSelectedCamera(selectedCameraId, cameras);
                 await scanner.start(cameraSelection.startTarget, DEFAULT_SCAN_CONFIG, async (decodedText) => {
                     if (cancelled) return;
                     await stopScanner();
