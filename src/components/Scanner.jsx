@@ -211,9 +211,12 @@ const Scanner = ({ onComplete }) => {
     const fileInputRef = useRef(null);
 
     const [isCameraActive, setIsCameraActive] = useState(false);
+    const [availableCameras, setAvailableCameras] = useState([]);
+    const [selectedCameraId, setSelectedCameraId] = useState('');
     const videoRef = useRef(null);
     const zxingReader = useRef(null);
     const scanInterval = useRef(null);
+
 
 
 
@@ -418,14 +421,38 @@ const Scanner = ({ onComplete }) => {
         } catch(e) {}
     }, [handleScannedContent, stopLiveCamera]);
 
-    const startLiveCamera = async () => {
+    const startLiveCamera = async (deviceId = null) => {
         try {
-            resetState();
-            setIsCameraActive(true);
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: 'environment' } },
+            const isSwitching = typeof deviceId === 'string' && deviceId.length > 0;
+            if (!isSwitching) {
+                resetState();
+                setIsCameraActive(true);
+            } else {
+                if (videoRef.current && videoRef.current.srcObject) {
+                    videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+                }
+                if (scanInterval.current) clearInterval(scanInterval.current);
+            }
+
+            const constraints = {
+                video: isSwitching ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } },
                 audio: false
-            });
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                setAvailableCameras(videoDevices);
+                
+                if (videoDevices.length > 0) {
+                    const currentTrack = stream.getVideoTracks()[0];
+                    const activeDevice = videoDevices.find(d => d.label === currentTrack.label);
+                    if (activeDevice && !isSwitching) setSelectedCameraId(activeDevice.deviceId);
+                    else if (isSwitching) setSelectedCameraId(deviceId);
+                }
+            } catch(e) {}
+
             // We use setTimeout to ensure the videoRef is mounted
             setTimeout(async () => {
                 if (videoRef.current) {
@@ -501,7 +528,7 @@ const Scanner = ({ onComplete }) => {
                 <p style={{ margin: '0 0 18px', fontSize: '0.85rem', color: 'var(--text-light)' }}>Escaneie seu cupom fiscal, QR Pix ou código de barras.</p>
 
                 {status === 'idle' && !isCameraActive && (
-                    <button type="button" className="btn-primary" onClick={startLiveCamera} style={{ width: '100%', padding: '16px', marginBottom: '22px', fontSize: '1rem' }}>
+                    <button type="button" className="btn-primary" onClick={() => startLiveCamera(null)} style={{ width: '100%', padding: '16px', marginBottom: '22px', fontSize: '1rem' }}>
                         <Camera size={22} style={{ marginRight: '8px' }} /> Usar Câmera do Dispositivo
                     </button>
                 )}
@@ -516,6 +543,17 @@ const Scanner = ({ onComplete }) => {
                             </div>
                             <p style={{ marginTop: '24px', fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)' }}>Aponte para o código</p>
                         </div>
+                        {availableCameras.length > 1 && (
+                            <select 
+                                value={selectedCameraId} 
+                                onChange={(e) => startLiveCamera(e.target.value)}
+                                style={{ position: 'absolute', top: '16px', left: '16px', right: '16px', width: 'auto', zIndex: 10, background: 'rgba(0,0,0,0.85)', color: 'white', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '12px', padding: '10px 14px', fontSize: '0.9rem' }}
+                            >
+                                {availableCameras.map(cam => (
+                                    <option key={cam.deviceId} value={cam.deviceId}>{cam.label || `Câmera ${cam.deviceId.substring(0, 5)}...`}</option>
+                                ))}
+                            </select>
+                        )}
                         <button type="button" onClick={stopLiveCamera} className="btn-secondary" style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)' }}>
                             Cancelar
                         </button>
