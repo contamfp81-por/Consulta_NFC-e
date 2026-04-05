@@ -50,9 +50,13 @@ const ReportsView = ({ onOpenPlanning }) => {
     const receiptsQuery = useLiveQuery(() => db.receipts.toArray());
     const productsQuery = useLiveQuery(() => db.products.toArray());
     const pixExpensesQuery = useLiveQuery(() => db.pixExpenses.toArray());
+    const productAliasesQuery = useLiveQuery(() => db.productAliases.toArray());
+    const foodClassificationOverridesQuery = useLiveQuery(() => db.foodClassificationOverrides.toArray());
     const receipts = useMemo(() => receiptsQuery || [], [receiptsQuery]);
     const products = useMemo(() => productsQuery || [], [productsQuery]);
     const pixExpenses = useMemo(() => pixExpensesQuery || [], [pixExpensesQuery]);
+    const productAliases = useMemo(() => productAliasesQuery || [], [productAliasesQuery]);
+    const foodClassificationOverrides = useMemo(() => foodClassificationOverridesQuery || [], [foodClassificationOverridesQuery]);
     const normalizedDateRange = useMemo(
         () => normalizeDateRange(startDateFilter, endDateFilter),
         [endDateFilter, startDateFilter]
@@ -67,8 +71,8 @@ const ReportsView = ({ onOpenPlanning }) => {
     );
 
     const insights = useMemo(
-        () => buildFinanceOverview({ receipts, products, pixExpenses }),
-        [pixExpenses, products, receipts]
+        () => buildFinanceOverview({ receipts, products, pixExpenses, productAliases, foodClassificationOverrides }),
+        [pixExpenses, products, receipts, productAliases, foodClassificationOverrides]
     );
 
     return (

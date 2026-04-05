@@ -18,10 +18,12 @@ const PlanningView = () => {
     const receipts = useLiveQuery(() => db.receipts.toArray()) || [];
     const products = useLiveQuery(() => db.products.toArray()) || [];
     const pixExpenses = useLiveQuery(() => db.pixExpenses.toArray()) || [];
+    const productAliases = useLiveQuery(() => db.productAliases.toArray()) || [];
+    const foodClassificationOverrides = useLiveQuery(() => db.foodClassificationOverrides.toArray()) || [];
 
     const insights = useMemo(
-        () => buildFinanceOverview({ receipts, products, pixExpenses }),
-        [pixExpenses, products, receipts]
+        () => buildFinanceOverview({ receipts, products, pixExpenses, productAliases, foodClassificationOverrides }),
+        [pixExpenses, products, receipts, productAliases, foodClassificationOverrides]
     );
 
     return (

@@ -1,5 +1,6 @@
 import { normalizePaymentMethod, PAYMENT_METHOD_NOT_INFORMED } from './paymentMethods';
 import { buildProductGrouping, getProductGroup } from './productGrouping';
+import { construirIndiceSaudeFinanceira } from './financialHealth';
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_HEALTH_SCORE = 68;
@@ -319,46 +320,7 @@ const buildDailySeries = (transactions = [], referenceDate = new Date(), windowS
     return Array.from(buckets.values());
 };
 
-const buildHealthScore = ({
-    currentMonthTotal,
-    previousMonthTotal,
-    topCategoryShare,
-    topMerchantShare,
-    creditShare,
-    positivePaymentShare,
-    maxDailySpend,
-    averageActiveDaySpend
-}) => {
-    if (currentMonthTotal <= 0) {
-        return {
-            score: DEFAULT_HEALTH_SCORE,
-            status: buildStatus(DEFAULT_HEALTH_SCORE),
-            note: 'O score sera refinado conforme novos gastos forem registrados.'
-        };
-    }
 
-    const variationPenalty = previousMonthTotal > 0
-        ? clamp(Math.abs((currentMonthTotal - previousMonthTotal) / previousMonthTotal) * 42, 0, 20)
-        : 6;
-    const concentrationPenalty = clamp((topCategoryShare * 22) + (topMerchantShare * 14), 0, 28);
-    const creditPenalty = clamp(creditShare * 22, 0, 18);
-    const spikePenalty = averageActiveDaySpend > 0 && maxDailySpend > averageActiveDaySpend
-        ? clamp(((maxDailySpend / averageActiveDaySpend) - 1) * 7, 0, 14)
-        : 0;
-    const positiveBonus = clamp(positivePaymentShare * 14, 0, 10);
-
-    const score = clamp(
-        Math.round(100 - variationPenalty - concentrationPenalty - creditPenalty - spikePenalty + positiveBonus),
-        32,
-        96
-    );
-
-    return {
-        score,
-        status: buildStatus(score),
-        note: 'Indice calculado pelo ritmo, concentracao e perfil das saidas registradas.'
-    };
-};
 
 export const getGreetingLabel = (date = new Date()) => {
     const safeDate = toDate(date) || new Date();
@@ -553,6 +515,7 @@ export const buildFinanceOverview = ({
     products = [],
     pixExpenses = [],
     productAliases = [],
+    foodClassificationOverrides = [],
     referenceDate = new Date()
 } = {}) => {
     const safeReferenceDate = toDate(referenceDate) || new Date();
@@ -601,16 +564,20 @@ export const buildFinanceOverview = ({
     const topCategoryShare = currentMonthTotal > 0 ? (Number(topCategory?.value) || 0) / currentMonthTotal : 0;
     const topMerchantShare = currentMonthTotal > 0 ? (Number(topMerchant?.value) || 0) / currentMonthTotal : 0;
     const variation = buildVariation(currentMonthTotal, previousMonthTotal);
-    const healthScore = buildHealthScore({
-        currentMonthTotal,
-        previousMonthTotal,
-        topCategoryShare,
-        topMerchantShare,
-        creditShare: currentMonthTotal > 0 ? creditTotal / currentMonthTotal : 0,
-        positivePaymentShare: currentMonthTotal > 0 ? positivePaymentTotal / currentMonthTotal : 0,
-        maxDailySpend,
-        averageActiveDaySpend
+    const healthModel = construirIndiceSaudeFinanceira({
+        receipts,
+        products,
+        pixExpenses,
+        productAliases,
+        foodClassificationOverrides,
+        referenceDate: safeReferenceDate
     });
+
+    const healthScore = {
+        score: healthModel.score,
+        status: healthModel.status,
+        note: healthModel.transparencyNote
+    };
     const projectedMonthSpend = currentMonthTotal > 0
         ? (currentMonthTotal / currentMonthDaysElapsed) * daysInMonth
         : 0;
