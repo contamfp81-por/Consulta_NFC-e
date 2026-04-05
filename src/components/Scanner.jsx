@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { AlertCircle, Camera, CheckCircle2, Image as ImageIcon, Loader2, QrCode, Save } from 'lucide-react';
+import { BrowserMultiFormatReader } from '@zxing/library';
+import { AlertCircle, Camera, CheckCircle2, Image as ImageIcon, Loader2, QrCode, Save, X } from 'lucide-react';
 import { db } from '../db';
 import { PAYMENT_METHOD_NOT_INFORMED } from '../utils/paymentMethods';
 import { autoCategorize, processNFCeURL } from '../utils/scraper';
@@ -209,6 +210,11 @@ const Scanner = ({ onComplete }) => {
     const [linkInput, setLinkInput] = useState('');
     const fileInputRef = useRef(null);
 
+    const [isCameraActive, setIsCameraActive] = useState(false);
+    const videoRef = useRef(null);
+    const zxingReader = useRef(null);
+    const scanInterval = useRef(null);
+
 
 
     const ensureCategoryExists = useCallback(async (categoryName) => {
@@ -328,6 +334,19 @@ const Scanner = ({ onComplete }) => {
         setErrorMessage('');
         setSuccessMessage('');
         setPixFormError('');
+
+        if (/^\d{44}$/.test(content) || /^\d{47,48}$/.test(content.replace(/\D/g, ''))) {
+            setStatus('success');
+            setSuccessMessage(`Boleto / Arrecadação identificado e copiado:\n${content}`);
+            try { if (navigator.clipboard) navigator.clipboard.writeText(content); } catch(e) {}
+            return;
+        } else if (/^\d{8,14}$/.test(content) && !content.startsWith('http')) {
+             setStatus('success');
+             setSuccessMessage(`Código do Produto / EAN identificado e copiado:\n${content}`);
+             try { if (navigator.clipboard) navigator.clipboard.writeText(content); } catch(e) {}
+             return;
+        }
+
         const qrResult = processarQRCode(content);
 
         if (qrResult.type === 'receipt') {
@@ -359,6 +378,76 @@ const Scanner = ({ onComplete }) => {
     }, [persistFiscalReceipt]);
 
 
+
+    const stopLiveCamera = useCallback(() => {
+        setIsCameraActive(false);
+        if (scanInterval.current) {
+            clearInterval(scanInterval.current);
+            scanInterval.current = null;
+        }
+        if (videoRef.current && videoRef.current.srcObject) {
+            videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+            videoRef.current.srcObject = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        return () => stopLiveCamera();
+    }, [stopLiveCamera]);
+
+    const scanFrame = useCallback(async () => {
+        if (!videoRef.current || videoRef.current.readyState !== videoRef.current.HAVE_ENOUGH_DATA) return;
+        try {
+            if (window.BarcodeDetector) {
+                const detector = new window.BarcodeDetector({ formats: ['qr_code', 'ean_13', 'ean_8', 'code_128', 'itf'] });
+                const barcodes = await detector.detect(videoRef.current);
+                if (barcodes.length > 0) {
+                    stopLiveCamera();
+                    handleScannedContent(barcodes[0].rawValue);
+                    return;
+                }
+            } else {
+                if (!zxingReader.current) zxingReader.current = new BrowserMultiFormatReader();
+                const result = zxingReader.current.decodeFromVideoElement(videoRef.current);
+                if (result && result.getText()) {
+                    stopLiveCamera();
+                    handleScannedContent(result.getText());
+                    return;
+                }
+            }
+        } catch(e) {}
+    }, [handleScannedContent, stopLiveCamera]);
+
+    const startLiveCamera = async () => {
+        try {
+            resetState();
+            setIsCameraActive(true);
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' } },
+                audio: false
+            });
+            // We use setTimeout to ensure the videoRef is mounted
+            setTimeout(async () => {
+                if (videoRef.current) {
+                    videoRef.current.srcObject = stream;
+                    videoRef.current.setAttribute('playsinline', 'true');
+                    await videoRef.current.play();
+                    try {
+                        const track = stream.getVideoTracks()[0];
+                        const caps = track.getCapabilities() || {};
+                        if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                            await track.applyConstraints({ focusMode: 'continuous' });
+                        }
+                    } catch(e) {}
+                    scanInterval.current = setInterval(scanFrame, 300);
+                }
+            }, 100);
+        } catch (e) {
+            stopLiveCamera();
+            setStatus('error');
+            setErrorMessage('Não foi possível acessar a câmera do dispositivo. Verifique as permissões do navegador.');
+        }
+    };
 
     const handleFileUpload = async (event) => {
         const file = event.target.files?.[0];
@@ -398,6 +487,7 @@ const Scanner = ({ onComplete }) => {
         setSuccessMessage('');
         setPixExpenseDraft(null);
         setPixFormError('');
+        stopLiveCamera();
     };
 
     return (
@@ -405,8 +495,32 @@ const Scanner = ({ onComplete }) => {
             <div id="reader-hidden" style={{ position: 'absolute', left: '-10000px', top: '-10000px', width: '360px', height: '360px', overflow: 'hidden', opacity: 0, pointerEvents: 'none' }} />
 
             <div className="glass-card" style={{ textAlign: 'center' }}>
-                <h3 style={{ marginBottom: '10px' }}>Leitor de QR Code</h3>
-                <p style={{ margin: '0 0 18px', fontSize: '0.85rem', color: 'var(--text-light)' }}>Escaneie um cupom fiscal ou um QR Pix de pagamento.</p>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <h3 style={{ margin: 0 }}>Leitor de QR Code</h3>
+                </div>
+                <p style={{ margin: '0 0 18px', fontSize: '0.85rem', color: 'var(--text-light)' }}>Escaneie seu cupom fiscal, QR Pix ou código de barras.</p>
+
+                {status === 'idle' && !isCameraActive && (
+                    <button type="button" className="btn-primary" onClick={startLiveCamera} style={{ width: '100%', padding: '16px', marginBottom: '22px', fontSize: '1rem' }}>
+                        <Camera size={22} style={{ marginRight: '8px' }} /> Usar Câmera do Dispositivo
+                    </button>
+                )}
+
+                {isCameraActive && (
+                    <div className="scanner-container">
+                        <video ref={videoRef} className="scanner-video" autoPlay playsInline muted></video>
+                        <div className="scanner-overlay">
+                            <div className="guide-box">
+                                <div className="guide-corners"></div>
+                                <div className="laser"></div>
+                            </div>
+                            <p style={{ marginTop: '24px', fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)' }}>Aponte para o código</p>
+                        </div>
+                        <button type="button" onClick={stopLiveCamera} className="btn-secondary" style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)' }}>
+                            Cancelar
+                        </button>
+                    </div>
+                )}
 
                 {status === 'processing' && (
                     <div className="premium-surface" style={{ padding: '24px 18px', marginBottom: '18px' }}>
