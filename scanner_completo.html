@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Scanner Universal de Códigos</title>
+    <!-- Fallback robusto para leitura caso BarcodeDetector nativo não exista -->
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+
+    <style>
+        :root {
+            --primary: #00ff88;
+            --bg-dark: #121212;
+            --surface: #1e1e1e;
+            --text: #ffffff;
+            --text-muted: #aaaaaa;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            /* Suporte nativo PWA/Mobile */
+            height: 100dvh;
+        }
+
+        /* HEADER */
+        header {
+            background-color: var(--surface);
+            padding: 16px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 1.1rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+
+        /* ÁREA DA CÂMERA */
+        .scanner-container {
+            flex: 1;
+            position: relative;
+            background-color: #000;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* OVERLAY E ANIMAÇÃO DE LEITURA */
+        .overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            transition: background-color 0.2s ease;
+        }
+
+        .guide-box {
+            width: 70%;
+            max-width: 300px;
+            aspect-ratio: 1 / 1;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5); /* Escurece o fora da caixa */
+        }
+
+        .guide-box::before, .guide-box::after,
+        .guide-corners::before, .guide-corners::after {
+            content: '';
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-radius: 16px;
+            border: 4px solid transparent;
+        }
+
+        .guide-box::before { top: -2px; left: -2px; border-top-color: var(--primary); border-left-color: var(--primary); }
+        .guide-box::after { top: -2px; right: -2px; border-top-color: var(--primary); border-right-color: var(--primary); }
+        .guide-corners { position: absolute; inset: 0; }
+        .guide-corners::before { bottom: -2px; left: -2px; border-bottom-color: var(--primary); border-left-color: var(--primary); }
+        .guide-corners::after { bottom: -2px; right: -2px; border-bottom-color: var(--primary); border-right-color: var(--primary); }
+
+        .laser {
+            width: 100%;
+            height: 2px;
+            background-color: var(--primary);
+            position: absolute;
+            top: 0;
+            box-shadow: 0 0 10px 2px rgba(0, 255, 136, 0.5);
+            animation: scan 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+
+        @keyframes scan {
+            0% { top: 0; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+
+        /* CONTROLES DA CÂMERA */
+        .controls {
+            position: absolute;
+            bottom: 24px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            padding: 0 16px;
+            z-index: 10;
+        }
+
+        button {
+            background-color: rgba(30, 30, 30, 0.8);
+            backdrop-filter: blur(8px);
+            color: var(--text);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 14px 24px;
+            border-radius: 30px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:active {
+            transform: scale(0.95);
+            background-color: rgba(60, 60, 60, 0.9);
+        }
+
+        button.primary {
+            background-color: var(--primary);
+            color: #000;
+            border: none;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* PAINEL DE RESULTADO */
+        .result-panel {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: var(--surface);
+            border-radius: 24px 24px 0 0;
+            padding: 24px;
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 20;
+            box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            max-height: 80vh;
+        }
+
+        .result-panel.active {
+            transform: translateY(0);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .result-badge {
+            background-color: rgba(0, 255, 136, 0.15);
+            color: var(--primary);
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .close-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 4px;
+            margin: 0;
+        }
+
+        .result-data {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .data-group {
+            background-color: rgba(255, 255, 255, 0.03);
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .data-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .data-value {
+            font-size: 1rem;
+            font-weight: 500;
+            word-break: break-all;
+        }
+
+        /* UTILITARIOS */
+        .hidden { display: none !important; }
+        .toast {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ef4444;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            text-align: center;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <header>Scanner UI</header>
+
+    <div class="scanner-container">
+        <video id="camera-feed" autoplay playsinline muted></video>
+        
+        <div class="overlay" id="scanner-overlay">
+            <div class="guide-box">
+                <div class="guide-corners"></div>
+                <div class="laser" id="scanner-laser"></div>
+            </div>
+            <p style="margin-top: 24px; font-size: 0.9rem; color: rgba(255,255,255,0.7);">Aponte para o código</p>
+        </div>
+
+        <div class="controls">
+            <button id="toggle-cam-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 8l-4 4 4 4"/><path d="M3 12h18"/><path d="M17 16l4-4-4-4"/></svg>
+                Alternar Câmera
+            </button>
+            <button id="toggle-scan-btn" class="primary">Pausar</button>
+        </div>
+    </div>
+
+    <!-- Painel de Resultados -->
+    <div class="result-panel" id="result-panel">
+        <div class="result-header">
+            <span class="result-badge" id="result-type">Analisando...</span>
+            <button class="close-btn" id="close-result-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+        <div class="result-data" id="result-data">
+            <!-- Dados inseridos dinamicamente -->
+        </div>
+    </div>
+
+    <div id="toast-msg" class="toast hidden"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const video = document.getElementById('camera-feed');
+            const overlay = document.getElementById('scanner-overlay');
+            const resultPanel = document.getElementById('result-panel');
+            const resultType = document.getElementById('result-type');
+            const resultData = document.getElementById('result-data');
+            const toggleCamBtn = document.getElementById('toggle-cam-btn');
+            const toggleScanBtn = document.getElementById('toggle-scan-btn');
+            const closeResultBtn = document.getElementById('close-result-btn');
+            const toastMsg = document.getElementById('toast-msg');
+            const laser = document.getElementById('scanner-laser');
+
+            // Estados do app
+            let isScanning = true;
+            let currentStream = null;
+            let currentFacingMode = 'environment'; // REQUISITO CRÍTICO: Padrão é traseira
+            let availableDevices = []; // Fallback para troca manual via ID se facingMode puro falhar
+            let activeDeviceId = null;
+            let detectionInterval = null;
+            let zxingReader = null; // Instância fallback
+
+            // --- 1. FUNÇÕES UTILITÁRIAS ---
+            const showToast = (message, type = 'error') => {
+                toastMsg.textContent = message;
+                toastMsg.style.backgroundColor = type === 'error' ? '#ef4444' : '#EAB308';
+                toastMsg.classList.remove('hidden');
+                setTimeout(() => toastMsg.classList.add('hidden'), 3500);
+            };
+
+            const triggerHaptic = () => {
+                if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
+                overlay.style.backgroundColor = 'rgba(0, 255, 136, 0.15)';
+                setTimeout(() => { overlay.style.backgroundColor = 'transparent'; }, 200);
+            };
+
+            const createDataGroup = (label, value) => {
+                const group = document.createElement('div');
+                group.className = 'data-group';
+                group.innerHTML = `<div class="data-label">${label}</div><div class="data-value">${value}</div>`;
+                return group;
+            };
+
+            // --- 2. DECODIFICAÇÃO EMV / PIX ---
+            const decodePixEMV = (payload) => {
+                const fields = new Map();
+                let cursor = 0;
+                while (cursor < payload.length) {
+                    if (cursor + 4 > payload.length) break;
+                    const id = payload.substring(cursor, cursor + 2);
+                    const lenStr = payload.substring(cursor + 2, cursor + 4);
+                    const len = parseInt(lenStr, 10);
+                    if (isNaN(len) || cursor + 4 + len > payload.length) break;
+                    
+                    const value = payload.substring(cursor + 4, cursor + 4 + len);
+                    fields.set(id, value);
+                    cursor += 4 + len;
+                }
+                return fields;
+            };
+
+            // --- 3. IDENTIFICAÇÃO E PARSE DE CONTEÚDO ---
+            const processScanResult = (text, formatDesc = '') => {
+                const rawText = text.trim();
+                let type = 'Conteúdo Desconhecido';
+                const extractedFields = [];
+
+                // A. Tenta identificar QR Fiscal (SEFAZ / CFe / NFCe)
+                if (/chNFe=|p=|nfce|nfe|sefaz/i.test(rawText)) {
+                    type = 'QR Fiscal (SEFAZ)';
+                    
+                    // Extrai UF pela URL (tentativa via regex básico de host sefaz)
+                    const ufMatch = rawText.match(/sefaz\.([a-z]{2})\.gov/i);
+                    if (ufMatch) extractedFields.push(['Estado Emissor (UF)', ufMatch[1].toUpperCase()]);
+                    
+                    // Extrai chave de acesso (44 dígitos normalmente logados após 'p=' ou 'chNFe=')
+                    const chaveMatch = rawText.match(/(?:chNFe=|p=)(\d{44})/i);
+                    if (chaveMatch) {
+                        extractedFields.push(['Chave de Acesso', chaveMatch[1]]);
+                    }
+                    
+                    extractedFields.push(['URL Base', rawText]);
+                } 
+                // B. Tenta identificar PIX EMV Padrão
+                else if (rawText.includes('br.gov.bcb.pix') || rawText.includes('BR.GOV.BCB.PIX')) {
+                    type = 'QR PIX';
+                    const pixData = decodePixEMV(rawText);
+                    
+                    if (pixData.has('59')) extractedFields.push(['Recebedor', pixData.get('59')]);
+                    if (pixData.has('60')) extractedFields.push(['Cidade', pixData.get('60')]);
+                    if (pixData.has('54')) extractedFields.push(['Valor', `R$ ${parseFloat(pixData.get('54')).toFixed(2)}`]);
+                    
+                    const txIdContainer = pixData.get('62');
+                    if (txIdContainer) {
+                        const extraFields = decodePixEMV(txIdContainer);
+                        if (extraFields.has('05')) extractedFields.push(['TXID (Identificador)', extraFields.get('05')]);
+                    }
+
+                    const merchantContainer = pixData.get('26');
+                    if (merchantContainer) {
+                        const mFields = decodePixEMV(merchantContainer);
+                        if (mFields.has('01')) extractedFields.push(['Chave Pix', mFields.get('01')]);
+                        if (mFields.has('02')) extractedFields.push(['Descrição Info', mFields.get('02')]);
+                    }
+                    
+                    extractedFields.push(['Payload EMV', rawText]);
+                }
+                // C. Tenta identificar Boleto (Linha digitável / Código 44 dígitos)
+                else if (/^\d{44}$/.test(rawText) || /^\d{47,48}$/.test(rawText.replace(/\D/g, ''))) {
+                    type = 'Boleto / Arrecadação';
+                    const cleanCode = rawText.replace(/\D/g, '');
+                    
+                    if (cleanCode.startsWith('8')) {
+                        extractedFields.push(['Tipo', 'Guia de Arrecadação (Tributo, Água, Luz)']);
+                    } else {
+                        extractedFields.push(['Tipo', 'Boleto Bancário / Cobrança']);
+                        extractedFields.push(['Cód. Banco', cleanCode.substring(0, 3)]);
+                    }
+                    extractedFields.push(['Linha Lida', rawText]);
+                }
+                // D. Tenta identificar Códigos de Produto comuns
+                else if (/^\d{8,14}$/.test(rawText) && !rawText.startsWith('http')) {
+                    type = 'Código de Produto';
+                    extractedFields.push(['Padrão Lógico', formatDesc || 'EAN / UPC / ITF']);
+                    extractedFields.push(['Código Numérico', rawText]);
+                }
+                // E. Desconhecido (texto ou url ordinária)
+                else {
+                    extractedFields.push(['Formato', formatDesc || 'Texto Padrão / Link']);
+                    extractedFields.push(['Conteúdo', rawText]);
+                }
+
+                return { type, fields: extractedFields };
+            };
+
+            const presentResult = (text, format) => {
+                if (!isScanning) return;
+                
+                isScanning = false;
+                triggerHaptic();
+                laser.style.animationPlayState = 'paused';
+                laser.style.opacity = '0';
+                toggleScanBtn.textContent = 'Retomar Leitura';
+                toggleScanBtn.classList.remove('primary');
+
+                const parsing = processScanResult(text, format);
+                
+                resultType.textContent = parsing.type;
+                resultData.innerHTML = '';
+                
+                parsing.fields.forEach(([label, value]) => {
+                    resultData.appendChild(createDataGroup(label, value));
+                });
+                
+                resultPanel.classList.add('active');
+            };
+
+            // --- 4. ENGINE DE LEITURA ---
+            const scanFrame = async () => {
+                if (!isScanning || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+                try {
+                    // PRIORIDADE: BarcodeDetection API nativa (Chrome Android)
+                    if (window.BarcodeDetector) {
+                        const detector = new window.BarcodeDetector({ formats: ['qr_code', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'itf'] });
+                        const barcodes = await detector.detect(video);
+                        if (barcodes.length > 0) {
+                            presentResult(barcodes[0].rawValue, barcodes[0].format);
+                            return;
+                        }
+                    } else {
+                        // FALLBACK: Initialize ZXing lazily
+                        if (!zxingReader && window.ZXing) {
+                            zxingReader = new ZXing.BrowserMultiFormatReader();
+                        }
+                        if (zxingReader) {
+                            const result = zxingReader.decodeFromVideoElement(video);
+                            if (result && result.text) {
+                                presentResult(result.text, result.format ? result.format.toString() : 'QR_CODE');
+                                return;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Falha silenciosa no scan progressivo para não afetar o frame loop
+                    if (e.name !== 'NotFoundException') { // NotFound é emitido a cada frame pelo zxing se n houver QR
+                        console.warn('Erro de decodificação no frame: ', e);
+                    }
+                }
+            };
+
+            const startFrameLoop = () => {
+                if (detectionInterval) clearInterval(detectionInterval);
+                detectionInterval = setInterval(scanFrame, 300); // 300ms p/ performance mobile 
+            };
+
+            // --- 5. GERENCIAMENTO DE CÂMERA ---
+            const stopCamera = () => {
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                    currentStream = null;
+                }
+                video.srcObject = null;
+                if (detectionInterval) clearInterval(detectionInterval);
+            };
+
+            const startCamera = async () => {
+                stopCamera();
+                
+                const constraints = {
+                    video: {
+                        facingMode: { ideal: currentFacingMode },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: false
+                };
+
+                // Se houver um fallback deviceId explicitamente escolhido do enumerate, injetar
+                if (activeDeviceId && currentFacingMode === 'exact') {
+                    constraints.video = { deviceId: { exact: activeDeviceId } };
+                }
+
+                try {
+                    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    video.srcObject = currentStream;
+                    video.setAttribute('playsinline', true); 
+                    await video.play();
+                    
+                    // Suporte a foco automático se disponível pela API
+                    const track = currentStream.getVideoTracks()[0];
+                    if (track && typeof track.applyConstraints === 'function') {
+                        try {
+                            const capabilities = track.getCapabilities() || {};
+                            if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+                                await track.applyConstraints({ focusMode: 'continuous' });
+                            }
+                        } catch (e) {} // Funcionalidade opcional, falha aceitável
+                    }
+
+                    if (isScanning) startFrameLoop();
+                } catch (err) {
+                    console.error("Erro ao iniciar câmera:", err);
+                    showToast('Permissão de câmera negada ou dispositivo indisponível.');
+                }
+            };
+
+            // Identificar hardware em fallback (caso getUserMedia 'environment' falhe ou para customizar botão)
+            const mapDevices = async () => {
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    availableDevices = devices.filter(device => device.kind === 'videoinput');
+                } catch (e) {
+                    console.error('Falha ao mapear devices', e);
+                }
+            };
+
+            // --- 6. EVENT BINDINGS ---
+            toggleCamBtn.addEventListener('click', async () => {
+                if (availableDevices.length > 1) {
+                    // Alterna estritamente entre frontal e traseiro base nativa, caso suportado
+                    currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+                    activeDeviceId = null; 
+                } else if (!availableDevices.length) {
+                    await mapDevices();
+                }
+                
+                // Botão indica carregamento e restaura logo após
+                const svg = toggleCamBtn.querySelector('svg');
+                svg.style.transform = 'rotate(180deg)';
+                svg.style.transition = 'transform 0.4s';
+                setTimeout(() => svg.style.transform = 'rotate(0deg)', 400);
+
+                await startCamera();
+            });
+
+            toggleScanBtn.addEventListener('click', () => {
+                if (isScanning) {
+                    isScanning = false;
+                    laser.style.animationPlayState = 'paused';
+                    laser.style.opacity = '0';
+                    toggleScanBtn.textContent = 'Retomar Leitura';
+                    toggleScanBtn.classList.remove('primary');
+                    if (detectionInterval) clearInterval(detectionInterval);
+                } else {
+                    resultPanel.classList.remove('active');
+                    isScanning = true;
+                    laser.style.animationPlayState = 'running';
+                    laser.style.opacity = '1';
+                    toggleScanBtn.textContent = 'Pausar';
+                    toggleScanBtn.classList.add('primary');
+                    startFrameLoop();
+                }
+            });
+
+            closeResultBtn.addEventListener('click', () => {
+                resultPanel.classList.remove('active');
+                if (!isScanning) toggleScanBtn.click(); // Retoma automatico ao fechar o modal
+            });
+
+            // Init App
+            const initApp = async () => {
+                // Pre-warm devices lookup se autorizado
+                await mapDevices();
+                await startCamera();
+            };
+
+            initApp();
+        });
+    </script>
+</body>
+</html>
