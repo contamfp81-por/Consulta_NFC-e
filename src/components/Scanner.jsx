@@ -426,9 +426,9 @@ const Scanner = ({ onComplete }) => {
             setCameras(normalized);
 
             if (!preserveCurrentSelection) {
-                setSelectedCameraId(normalized[0]?.id || '');
+                setSelectedCameraId(normalized.length > 0 ? MACRO_CAMERA_OPTION_ID : '');
             } else {
-                setSelectedCameraId((currentSelectedCameraId) => currentSelectedCameraId || normalized[0]?.id || '');
+                setSelectedCameraId((currentSelectedCameraId) => currentSelectedCameraId || (normalized.length > 0 ? MACRO_CAMERA_OPTION_ID : ''));
             }
 
             return normalized;
