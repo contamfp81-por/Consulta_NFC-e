@@ -13,161 +13,6 @@ const QR_READER_OPTIONS = {
 };
 
 const DEFAULT_CATEGORY_COLOR = '#607D8B';
-const MACRO_CAMERA_OPTION_ID = '__scanner_macro_camera__';
-const DEFAULT_SCAN_CONFIG = {
-    fps: 12,
-    qrbox: (viewfinderWidth, viewfinderHeight) => {
-        const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-        const qrboxSize = Math.floor(minEdge * 0.85); // Aumenta a area de leitura para 85%
-        return {
-            width: Math.max(220, qrboxSize),
-            height: Math.max(220, qrboxSize)
-        };
-    },
-    videoConstraints: {
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
-    }
-};
-
-const createQrCodeReader = (elementId) => new Html5Qrcode(elementId, QR_READER_OPTIONS);
-const normalizeCameraLabelText = (value) => String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-
-const normalizeCameraList = (cameras = []) => cameras.map((camera, index) => ({
-    ...camera,
-    label: String(camera.label || '').trim() || `Camera ${index + 1}`,
-    normalizedLabel: normalizeCameraLabelText(camera.label || '')
-}));
-
-const hasAnyKeyword = (text, keywords = []) => keywords.some((keyword) => text.includes(keyword));
-
-const isFrontFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['front', 'frontal', 'selfie', 'user', 'face']);
-const isRearFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['back', 'rear', 'traseira', 'environment', 'externa', 'principal', 'main']);
-const isMacroNamedCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['macro', 'ultra-wide', 'ultrawide', 'wide-angle', 'wide angle', '0.5x', '0,5x']);
-
-const hasDetailedCameraLabels = (cameras = []) => cameras.some((camera) => Boolean(camera?.normalizedLabel));
-
-const buildCameraOptions = (cameras = []) => {
-    if (!Array.isArray(cameras) || !cameras.length) return [];
-
-    return [
-        { id: MACRO_CAMERA_OPTION_ID, label: 'Lente Traseira (Modo Qualidade/Macro Automático)', mode: 'macro' },
-        ...cameras.map((camera) => ({
-            id: camera.id,
-            label: camera.label,
-            mode: 'device'
-        }))
-    ];
-};
-
-const resolveSelectedCamera = (selectedCameraId, cameras = []) => {
-    if (selectedCameraId === MACRO_CAMERA_OPTION_ID) {
-        return {
-            mode: 'macro',
-            resolvedCamera: null,
-            // Passa explicitamente o facingMode puro. Android e iOS sempre abrem a lente traseira física com isso.
-            startTarget: { facingMode: 'environment' }
-        };
-    }
-
-    return {
-        mode: 'device',
-        resolvedCamera: cameras.find((camera) => camera.id === selectedCameraId) || null,
-        startTarget: selectedCameraId
-    };
-};
-
-const buildPreferredResolutionConstraint = (capabilities = {}) => {
-    const widthMax = Number.isFinite(capabilities.width?.max) ? capabilities.width.max : null;
-    const heightMax = Number.isFinite(capabilities.height?.max) ? capabilities.height.max : null;
-
-    if (widthMax === null && heightMax === null) return null;
-
-    return {
-        width: widthMax !== null ? { ideal: Math.min(widthMax, 2560) } : undefined,
-        height: heightMax !== null ? { ideal: Math.min(heightMax, 1440) } : undefined
-    };
-};
-
-const buildMacroFocusConstraintCandidates = (capabilities = {}, settings = {}) => {
-    const candidates = [];
-    const focusModes = Array.isArray(capabilities.focusMode) ? capabilities.focusMode : [];
-    const focusDistanceMin = Number.isFinite(capabilities.focusDistance?.min) ? capabilities.focusDistance.min : null;
-    const currentFocusDistance = Number.isFinite(settings?.focusDistance) ? settings.focusDistance : null;
-
-    if (focusModes.includes('manual') && focusDistanceMin !== null) {
-        candidates.push({ advanced: [{ focusMode: 'manual', focusDistance: focusDistanceMin }] });
-    }
-
-    if (focusDistanceMin !== null && currentFocusDistance !== focusDistanceMin) {
-        candidates.push({ advanced: [{ focusDistance: focusDistanceMin }] });
-    }
-
-    if (focusModes.includes('continuous')) {
-        candidates.push({ advanced: [{ focusMode: 'continuous' }] });
-    } else if (focusModes.includes('single-shot')) {
-        candidates.push({ advanced: [{ focusMode: 'single-shot' }] });
-    }
-
-    return candidates;
-};
-
-const buildMacroConstraintSteps = (capabilities = {}, settings = {}) => {
-    const steps = [];
-    const preferredResolution = buildPreferredResolutionConstraint(capabilities);
-    const focusConstraintCandidates = buildMacroFocusConstraintCandidates(capabilities, settings);
-    const zoomMin = Number.isFinite(capabilities.zoom?.min) ? capabilities.zoom.min : null;
-    const zoomMax = Number.isFinite(capabilities.zoom?.max) ? capabilities.zoom.max : null;
-    const currentZoom = Number.isFinite(settings?.zoom) ? settings.zoom : null;
-
-    if (preferredResolution) {
-        steps.push(preferredResolution);
-    }
-
-    if (zoomMin !== null && zoomMax !== null) {
-        // Applica um zoom moderado (2.3x) para focar melhor em QR codes pequenos nos cupons fiscais
-        const targetZoom = Math.min(zoomMax, Math.max(zoomMin, 2.3));
-        if (currentZoom !== targetZoom) {
-            steps.push({ advanced: [{ zoom: targetZoom }] });
-        }
-    } else if (zoomMin !== null && currentZoom !== zoomMin) {
-        steps.push({ advanced: [{ zoom: zoomMin }] });
-    }
-
-    if (focusConstraintCandidates.length) {
-        steps.push(...focusConstraintCandidates);
-    }
-
-    return steps;
-};
-
-const applyMacroProfileIfSupported = async (scanner) => {
-    if (!scanner || typeof scanner.getRunningTrackCapabilities !== 'function' || typeof scanner.applyVideoConstraints !== 'function') {
-        return;
-    }
-
-    let capabilities = null;
-    let settings = null;
-
-    try {
-        capabilities = scanner.getRunningTrackCapabilities();
-        settings = scanner.getRunningTrackSettings?.() || {};
-    } catch {
-        return;
-    }
-
-    const constraintSteps = buildMacroConstraintSteps(capabilities, settings);
-    for (const constraints of constraintSteps) {
-        try {
-            await scanner.applyVideoConstraints(constraints);
-        } catch {
-            // Nem todo navegador expõe foco ou zoom para a camera ativa.
-        }
-    }
-};
 
 const parseCurrencyInput = (value) => {
     if (!value) return 0;
@@ -361,47 +206,10 @@ const Scanner = ({ onComplete }) => {
     const [successMessage, setSuccessMessage] = useState('');
     const [pixExpenseDraft, setPixExpenseDraft] = useState(null);
     const [pixFormError, setPixFormError] = useState('');
-    const [cameras, setCameras] = useState([]);
-    const [selectedCameraId, setSelectedCameraId] = useState('');
     const [linkInput, setLinkInput] = useState('');
     const fileInputRef = useRef(null);
-    const scannerRef = useRef(null);
-    const cameraOptions = buildCameraOptions(cameras);
-    const isMacroCameraSelected = selectedCameraId === MACRO_CAMERA_OPTION_ID;
 
-    const stopScanner = useCallback(async () => {
-        const scanner = scannerRef.current;
-        scannerRef.current = null;
-        if (!scanner) return;
-        try { await scanner.stop(); } catch { /* limpeza defensiva */ }
-        try { await scanner.clear(); } catch { /* limpeza defensiva */ }
-    }, []);
 
-    const loadAvailableCameras = useCallback(async (preserveCurrentSelection = true) => {
-        try {
-            const availableCameras = await Html5Qrcode.getCameras();
-            const normalized = normalizeCameraList(availableCameras);
-            setCameras(normalized);
-
-            if (!preserveCurrentSelection) {
-                setSelectedCameraId(normalized.length > 0 ? MACRO_CAMERA_OPTION_ID : '');
-            } else {
-                setSelectedCameraId((currentSelectedCameraId) => currentSelectedCameraId || (normalized.length > 0 ? MACRO_CAMERA_OPTION_ID : ''));
-            }
-
-            return normalized;
-        } catch (error) {
-            console.error('Erro ao listar cameras:', error);
-            setCameras([]);
-            if (!preserveCurrentSelection) {
-                setSelectedCameraId('');
-            }
-            return [];
-        }
-    }, []);
-
-    // Funcionalidade de lock da macro foi removida por ser instável no Chrome de Androids customizados.
-    const unlockCameraLabelsForMacroSelection = useCallback(async () => cameras, [cameras]);
 
     const ensureCategoryExists = useCallback(async (categoryName) => {
         const name = String(categoryName || '').trim();
@@ -550,47 +358,7 @@ const Scanner = ({ onComplete }) => {
         setErrorMessage('Nao foi possivel identificar se este QR Code e um cupom fiscal ou um QR Pix de pagamento.');
     }, [persistFiscalReceipt]);
 
-    useEffect(() => {
-        loadAvailableCameras(false);
 
-        return () => {
-            stopScanner();
-        };
-    }, [loadAvailableCameras, stopScanner]);
-
-    useEffect(() => {
-        if (status !== 'scanning' || !selectedCameraId) return undefined;
-        let cancelled = false;
-
-        const startScanner = async () => {
-            try {
-                const scanner = createQrCodeReader('reader');
-                scannerRef.current = scanner;
-                const cameraSelection = resolveSelectedCamera(selectedCameraId, cameras);
-                await scanner.start(cameraSelection.startTarget, DEFAULT_SCAN_CONFIG, async (decodedText) => {
-                    if (cancelled) return;
-                    await stopScanner();
-                    await handleScannedContent(decodedText);
-                }, () => {});
-                if (cameraSelection.mode === 'macro') {
-                    await applyMacroProfileIfSupported(scanner);
-                }
-            } catch (error) {
-                if (cancelled) return;
-                console.error('Erro ao iniciar camera:', error);
-                setStatus('error');
-                setErrorMessage('Falha ao acessar esta camera. Tente outra disponivel no aparelho.');
-                await stopScanner();
-            }
-        };
-
-        startScanner();
-
-        return () => {
-            cancelled = true;
-            stopScanner();
-        };
-    }, [cameras, handleScannedContent, selectedCameraId, status, stopScanner, unlockCameraLabelsForMacroSelection]);
 
     const handleFileUpload = async (event) => {
         const file = event.target.files?.[0];
@@ -624,7 +392,6 @@ const Scanner = ({ onComplete }) => {
     };
 
     const resetState = async () => {
-        await stopScanner();
         setStatus('idle');
         setProcessingMessage('');
         setErrorMessage('');
@@ -691,45 +458,23 @@ const Scanner = ({ onComplete }) => {
                     </div>
                 )}
 
-                {status === 'scanning' ? (
-                    <div className="premium-surface" style={{ marginBottom: '18px' }}>
-                        <div id="reader" style={{ minHeight: '320px' }} />
-                        <button type="button" className="btn-secondary" style={{ marginTop: '14px' }} onClick={resetState}>Fechar camera</button>
+                <div style={{ display: 'grid', gap: '18px' }}>
+                    <div style={{ padding: '18px 0', borderTop: '1px solid #eee' }}>
+                        <label style={{ fontSize: '0.85rem', color: 'var(--text-light)', display: 'block', marginBottom: '12px' }}>Carregar imagem do QRCode</label>
+                        <input type="file" accept="image/*" style={{ display: 'none' }} ref={fileInputRef} onChange={handleFileUpload} />
+                        <button type="button" className="btn-primary" style={{ background: 'white', color: 'var(--primary-blue)', border: '1px solid #ddd' }} onClick={() => fileInputRef.current?.click()}>
+                            <ImageIcon size={18} /> Carregar Imagem
+                        </button>
                     </div>
-                ) : (
-                    <div style={{ display: 'grid', gap: '18px' }}>
-                        <div style={{ padding: '18px 0', borderTop: '1px solid #eee' }}>
-                            <label style={{ fontSize: '0.85rem', color: 'var(--text-light)', display: 'block', marginBottom: '12px' }}>Lente selecionada</label>
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                <select style={{ flex: 1, minWidth: '220px' }} value={selectedCameraId} onChange={(event) => setSelectedCameraId(event.target.value)}>
-                                    {cameraOptions.length > 0 ? cameraOptions.map((camera) => <option key={camera.id} value={camera.id}>{camera.label}</option>) : <option value="">Nenhuma camera detectada</option>}
-                                </select>
-                                <button type="button" className="btn-primary" onClick={() => setStatus('scanning')} disabled={!selectedCameraId}><Camera size={18} /> Abrir camera</button>
-                            </div>
-                            {isMacroCameraSelected ? (
-                                <p style={{ marginTop: '10px', fontSize: '0.8rem', color: 'var(--text-light)', textAlign: 'left' }}>
-                                    O modo macro tenta abrir a melhor camera traseira para close-up e aplicar foco continuo ou aproximacao compativel, quando o navegador do aparelho expuser esses recursos.
-                                </p>
-                            ) : null}
-                        </div>
 
-                        <div style={{ padding: '18px 0', borderTop: '1px solid #eee' }}>
-                            <label style={{ fontSize: '0.85rem', color: 'var(--text-light)', display: 'block', marginBottom: '12px' }}>Ou use um arquivo de imagem</label>
-                            <input type="file" accept="image/*" style={{ display: 'none' }} ref={fileInputRef} onChange={handleFileUpload} />
-                            <button type="button" className="btn-primary" style={{ background: 'white', color: 'var(--primary-blue)', border: '1px solid #ddd' }} onClick={() => fileInputRef.current?.click()}>
-                                <ImageIcon size={18} /> Carregar QR Code
-                            </button>
-                        </div>
-
-                        <div style={{ padding: '18px 0', borderTop: '1px solid #eee' }}>
-                            <label style={{ fontSize: '0.85rem', color: 'var(--text-light)', display: 'block', marginBottom: '12px' }}>Ou cole o conteudo do QR Code</label>
-                            <form onSubmit={handleLinkSubmit} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                <input type="text" placeholder="Cole o link fiscal ou payload Pix" value={linkInput} onChange={(event) => setLinkInput(event.target.value)} style={{ flex: 1, minWidth: '220px' }} />
-                                <button type="submit" className="btn-primary"><QrCode size={18} /> Processar</button>
-                            </form>
-                        </div>
+                    <div style={{ padding: '18px 0', borderTop: '1px solid #eee' }}>
+                        <label style={{ fontSize: '0.85rem', color: 'var(--text-light)', display: 'block', marginBottom: '12px' }}>Ou cole o conteudo do QR Code</label>
+                        <form onSubmit={handleLinkSubmit} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <input type="text" placeholder="Cole o link fiscal ou payload Pix" value={linkInput} onChange={(event) => setLinkInput(event.target.value)} style={{ flex: 1, minWidth: '220px' }} />
+                            <button type="submit" className="btn-primary"><QrCode size={18} /> Processar</button>
+                        </form>
                     </div>
-                )}
+                </div>
             </div>
         </div>
     );
