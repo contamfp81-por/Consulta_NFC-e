@@ -44,15 +44,20 @@ const normalizeCameraList = (cameras = []) => cameras.map((camera, index) => ({
 
 const hasAnyKeyword = (text, keywords = []) => keywords.some((keyword) => text.includes(keyword));
 
-const isFrontFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['front', 'frontal', 'selfie', 'user']);
-const isRearFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['back', 'rear', 'traseira', 'environment', 'externa']);
+const isFrontFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['front', 'frontal', 'selfie', 'user', 'face']);
+const isRearFacingCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['back', 'rear', 'traseira', 'environment', 'externa', 'principal', 'main']);
 const isMacroNamedCamera = (camera) => hasAnyKeyword(camera?.normalizedLabel || '', ['macro', 'ultra-wide', 'ultrawide', 'wide-angle', 'wide angle', '0.5x', '0,5x']);
 
 const scoreMacroCameraCandidate = (camera) => {
     const label = camera?.normalizedLabel || '';
     let score = 0;
 
-    if (isFrontFacingCamera(camera)) score -= 100;
+    if (isFrontFacingCamera(camera)) {
+        score -= 100;
+    } else {
+        score += 5; // Assume que qualquer lente não-frontal seja traseira e pontua
+    }
+
     if (isRearFacingCamera(camera)) score += 35;
     if (label.includes('macro')) score += 120;
     if (hasAnyKeyword(label, ['ultra-wide', 'ultrawide', 'wide-angle', 'wide angle', '0.5x', '0,5x'])) score += 70;
@@ -63,9 +68,16 @@ const scoreMacroCameraCandidate = (camera) => {
 const scoreRearCameraCandidate = (camera) => {
     let score = 0;
 
-    if (isFrontFacingCamera(camera)) score -= 100;
+    if (isFrontFacingCamera(camera)) {
+        score -= 100;
+    } else {
+        score += 10; // Se não for frontal, assume como forte candidata traseira
+    }
+
     if (isRearFacingCamera(camera)) score += 80;
     if (isMacroNamedCamera(camera)) score += 20;
+    
+    if (camera?.label?.includes(' 0') || camera?.id?.endsWith('0')) score += 5;
 
     return score;
 };
@@ -111,7 +123,7 @@ const resolveSelectedCamera = (selectedCameraId, cameras = []) => {
         return {
             mode: 'macro',
             resolvedCamera,
-            startTarget: resolvedCamera?.id || { facingMode: { exact: 'environment' } }
+            startTarget: resolvedCamera?.id || { facingMode: 'environment' }
         };
     }
 
