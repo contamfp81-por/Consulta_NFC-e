@@ -110,6 +110,20 @@ const HomeView = ({
         () => foodClassificationOverridesQuery || [],
         [foodClassificationOverridesQuery]
     );
+    const currentMonthKey = useMemo(() => {
+        const date = new Date();
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    }, []);
+    const currentMonthReceipts = useMemo(() => {
+        return receipts.filter((receipt) => receipt.date && receipt.date.startsWith(currentMonthKey));
+    }, [currentMonthKey, receipts]);
+    const currentMonthReceiptIds = useMemo(
+        () => new Set(currentMonthReceipts.map((receipt) => receipt.id)),
+        [currentMonthReceipts]
+    );
+    const currentMonthProducts = useMemo(() => {
+        return products.filter((product) => currentMonthReceiptIds.has(product.receiptId));
+    }, [currentMonthReceiptIds, products]);
 
     const insights = useMemo(
         () => buildFinanceOverview({ receipts, products, pixExpenses, productAliases }),
@@ -117,8 +131,13 @@ const HomeView = ({
     );
 
     const foodAnalysis = useMemo(
-        () => analyzeFoodPurchases({ receipts, products, productAliases, foodClassificationOverrides }),
-        [foodClassificationOverrides, productAliases, products, receipts]
+        () => analyzeFoodPurchases({
+            receipts: currentMonthReceipts,
+            products: currentMonthProducts,
+            productAliases,
+            foodClassificationOverrides
+        }),
+        [currentMonthProducts, currentMonthReceipts, foodClassificationOverrides, productAliases]
     );
 
     const financialHealthModel = useMemo(
